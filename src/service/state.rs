@@ -1,10 +1,10 @@
-use crate::ble::{Base64HexBytes, SetHumidifierMode, SetHumidifierNightlightParams};
 use crate::lan_api::{Client as LanClient, DeviceStatus as LanDeviceStatus, LanDevice};
 use crate::platform_api::{DeviceCapability, DeviceType, GoveeApiClient};
 use crate::service::coordinator::Coordinator;
 use crate::service::device::Device;
 use crate::service::hass::{topic_safe_id, HassClient};
 use crate::service::iot::IotClient;
+use crate::service::transport::{self, DeviceOp, TransportId};
 use crate::temperature::{TemperatureScale, TemperatureValue};
 use crate::undoc_api::GoveeUndocumentedApi;
 use anyhow::Context;
@@ -26,6 +26,8 @@ pub struct State {
     hass_client: Mutex<Option<HassClient>>,
     hass_discovery_prefix: Mutex<String>,
     temperature_scale: Mutex<TemperatureScale>,
+    /// Optional configured transport priority prefix; see `service::transport`.
+    transport_order: Mutex<Option<Vec<TransportId>>>,
 }
 
 pub type StateHandle = Arc<State>;
@@ -41,6 +43,13 @@ impl State {
 
     pub async fn get_temperature_scale(&self) -> TemperatureScale {
         *self.temperature_scale.lock().await
+    }
+
+    /// Configure a transport priority prefix. Wired up to configuration in the
+    /// milestone that introduces the BLE transport.
+    #[allow(dead_code)]
+    pub async fn set_transport_order(&self, order: Option<Vec<TransportId>>) {
+        *self.transport_order.lock().await = order;
     }
 
     pub async fn set_hass_disco_prefix(&self, prefix: String) {
@@ -255,7 +264,7 @@ impl State {
         Ok(false)
     }
 
-    async fn poll_lan_api<F: Fn(&LanDeviceStatus) -> bool>(
+    pub(crate) async fn poll_lan_api<F: Fn(&LanDeviceStatus) -> bool>(
         self: &Arc<Self>,
         device: &LanDevice,
         acceptor: F,
@@ -299,53 +308,57 @@ impl State {
         anyhow::bail!("Unable to use Platform API to control {device}");
     }
 
+    /// Run a transport-agnostic operation against a device, letting
+    /// `service::transport` pick the transport.
+    pub async fn execute_op(self: &Arc<Self>, device: &Device, op: DeviceOp) -> anyhow::Result<()> {
+        let override_order = self.transport_order.lock().await.clone();
+        transport::execute_op(self, device, &op, override_order.as_deref()).await?;
+        self.apply_op_side_effects(device, &op).await;
+        Ok(())
+    }
+
+    /// Bookkeeping that is a property of the operation rather than of the
+    /// transport that carried it. Upstream applied this inconsistently — the
+    /// scene was invalidated on the LAN and Platform paths but not the IoT one —
+    /// so centralising it here also fixes that.
+    async fn apply_op_side_effects(self: &Arc<Self>, device: &Device, op: &DeviceOp) {
+        match op {
+            DeviceOp::SetColorRgb { .. } | DeviceOp::SetColorTemperature(_) => {
+                self.device_mut(&device.sku, &device.id)
+                    .await
+                    .set_active_scene(None);
+            }
+            DeviceOp::SetScene(scene) => {
+                self.device_mut(&device.sku, &device.id)
+                    .await
+                    .set_active_scene(Some(scene));
+            }
+            _ => {}
+        }
+    }
+
     pub async fn device_light_power_on(
         self: &Arc<Self>,
         device: &Device,
         on: bool,
     ) -> anyhow::Result<()> {
-        if self
-            .try_humidifier_set_nightlight(device, |p| p.on = on)
-            .await?
-        {
-            return Ok(());
-        }
-
-        let instance_name = device
-            .get_light_power_toggle_instance_name()
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Don't know how to toggle just the light portion of {device}. \
-                     Please share the device metadata and state if you report this issue"
-                )
-            })?;
-
-        if let Some(lan_dev) = &device.lan_device {
-            log::info!("Using LAN API to set {device} light power state");
-            lan_dev.send_turn(on).await?;
-            self.poll_lan_api(lan_dev, |status| status.on == on).await?;
-            return Ok(());
-        }
-
-        if device.iot_api_supported() {
-            if let Some(iot) = self.get_iot_client().await {
-                if let Some(info) = &device.undoc_device_info {
-                    log::info!("Using IoT API to set {device} light power state");
-                    iot.set_power_state(&info.entry, on).await?;
-                    return Ok(());
+        // The nightlight transport takes precedence and does not need a light
+        // toggle instance name, so the name is only required once every
+        // transport has declined. Reported as a specific diagnostic because
+        // "we don't understand this device" is far more actionable than
+        // "no transport available".
+        self.execute_op(device, DeviceOp::LightPowerOn(on))
+            .await
+            .map_err(|err| {
+                if device.get_light_power_toggle_instance_name().is_none() {
+                    anyhow::anyhow!(
+                        "Don't know how to toggle just the light portion of {device}. \
+                         Please share the device metadata and state if you report this issue"
+                    )
+                } else {
+                    err
                 }
-            }
-        }
-
-        if let Some(client) = self.get_platform_client().await {
-            if let Some(info) = &device.http_device_info {
-                log::info!("Using Platform API to set {device} light {instance_name} state");
-                client.set_toggle_state(info, instance_name, on).await?;
-                return Ok(());
-            }
-        }
-
-        anyhow::bail!("Unable to control light power state for {device}");
+            })
     }
 
     pub async fn device_power_on(
@@ -353,32 +366,7 @@ impl State {
         device: &Device,
         on: bool,
     ) -> anyhow::Result<()> {
-        if let Some(lan_dev) = &device.lan_device {
-            log::info!("Using LAN API to set {device} power state");
-            lan_dev.send_turn(on).await?;
-            self.poll_lan_api(lan_dev, |status| status.on == on).await?;
-            return Ok(());
-        }
-
-        if device.iot_api_supported() {
-            if let Some(iot) = self.get_iot_client().await {
-                if let Some(info) = &device.undoc_device_info {
-                    log::info!("Using IoT API to set {device} power state");
-                    iot.set_power_state(&info.entry, on).await?;
-                    return Ok(());
-                }
-            }
-        }
-
-        if let Some(client) = self.get_platform_client().await {
-            if let Some(info) = &device.http_device_info {
-                log::info!("Using Platform API to set {device} power state");
-                client.set_power_state(info, on).await?;
-                return Ok(());
-            }
-        }
-
-        anyhow::bail!("Unable to control power state for {device}");
+        self.execute_op(device, DeviceOp::PowerOn(on)).await
     }
 
     pub async fn device_set_brightness(
@@ -386,42 +374,8 @@ impl State {
         device: &Device,
         percent: u8,
     ) -> anyhow::Result<()> {
-        if self
-            .try_humidifier_set_nightlight(device, |p| {
-                p.brightness = percent;
-                p.on = true;
-            })
-            .await?
-        {
-            return Ok(());
-        }
-
-        if let Some(lan_dev) = &device.lan_device {
-            log::info!("Using LAN API to set {device} brightness");
-            lan_dev.send_brightness(percent).await?;
-            self.poll_lan_api(lan_dev, |status| status.brightness == percent)
-                .await?;
-            return Ok(());
-        }
-
-        if device.iot_api_supported() {
-            if let Some(iot) = self.get_iot_client().await {
-                if let Some(info) = &device.undoc_device_info {
-                    log::info!("Using IoT API to set {device} brightness");
-                    iot.set_brightness(&info.entry, percent).await?;
-                    return Ok(());
-                }
-            }
-        }
-
-        if let Some(client) = self.get_platform_client().await {
-            if let Some(info) = &device.http_device_info {
-                log::info!("Using Platform API to set {device} brightness");
-                client.set_brightness(info, percent).await?;
-                return Ok(());
-            }
-        }
-        anyhow::bail!("Unable to control brightness for {device}");
+        self.execute_op(device, DeviceOp::SetBrightness(percent))
+            .await
     }
 
     pub async fn device_set_color_temperature(
@@ -429,61 +383,8 @@ impl State {
         device: &Device,
         kelvin: u32,
     ) -> anyhow::Result<()> {
-        if let Some(lan_dev) = &device.lan_device {
-            log::info!("Using LAN API to set {device} color temperature");
-            lan_dev.send_color_temperature_kelvin(kelvin).await?;
-            self.poll_lan_api(lan_dev, |status| status.color_temperature_kelvin == kelvin)
-                .await?;
-            self.device_mut(&device.sku, &device.id)
-                .await
-                .set_active_scene(None);
-            return Ok(());
-        }
-
-        if device.iot_api_supported() {
-            if let Some(iot) = self.get_iot_client().await {
-                if let Some(info) = &device.undoc_device_info {
-                    log::info!("Using IoT API to set {device} color temperature");
-                    iot.set_color_temperature(&info.entry, kelvin).await?;
-                    return Ok(());
-                }
-            }
-        }
-
-        if let Some(client) = self.get_platform_client().await {
-            if let Some(info) = &device.http_device_info {
-                log::info!("Using Platform API to set {device} color temperature");
-                client.set_color_temperature(info, kelvin).await?;
-                self.device_mut(&device.sku, &device.id)
-                    .await
-                    .set_active_scene(None);
-                return Ok(());
-            }
-        }
-        anyhow::bail!("Unable to control color temperature for {device}");
-    }
-
-    // FIXME: this function probably shouldn't exist here
-    async fn try_humidifier_set_nightlight<F: Fn(&mut SetHumidifierNightlightParams)>(
-        self: &Arc<Self>,
-        device: &Device,
-        apply: F,
-    ) -> anyhow::Result<bool> {
-        let mut params: SetHumidifierNightlightParams =
-            device.nightlight_state.unwrap_or_default().into();
-        (apply)(&mut params);
-
-        if let Ok(command) = Base64HexBytes::encode_for_sku(&device.sku, &params) {
-            if let Some(iot) = self.get_iot_client().await {
-                if let Some(info) = &device.undoc_device_info {
-                    log::info!("Using IoT API to set {device} color");
-                    iot.send_real(&info.entry, command.base64()).await?;
-                    return Ok(true);
-                }
-            }
-        }
-
-        Ok(false)
+        self.execute_op(device, DeviceOp::SetColorTemperature(kelvin))
+            .await
     }
 
     pub async fn humidifier_set_parameter(
@@ -492,28 +393,11 @@ impl State {
         work_mode: i64,
         value: i64,
     ) -> anyhow::Result<()> {
-        if let Ok(command) = Base64HexBytes::encode_for_sku(
-            &device.sku,
-            &SetHumidifierMode {
-                mode: work_mode as u8,
-                param: value as u8,
-            },
-        ) {
-            if let Some(iot) = self.get_iot_client().await {
-                if let Some(info) = &device.undoc_device_info {
-                    iot.send_real(&info.entry, command.base64()).await?;
-                    return Ok(());
-                }
-            }
-        }
-
-        if let Some(client) = self.get_platform_client().await {
-            if let Some(info) = &device.http_device_info {
-                client.set_work_mode(info, work_mode, value).await?;
-                return Ok(());
-            }
-        }
-        anyhow::bail!("Unable to control humidifier parameter work_mode={work_mode} for {device}");
+        self.execute_op(
+            device,
+            DeviceOp::SetHumidifierParameter { work_mode, value },
+        )
+        .await
     }
 
     pub async fn device_set_color_rgb(
@@ -523,51 +407,8 @@ impl State {
         g: u8,
         b: u8,
     ) -> anyhow::Result<()> {
-        if self
-            .try_humidifier_set_nightlight(device, |p| {
-                p.r = r;
-                p.g = g;
-                p.b = b;
-                p.on = true;
-            })
-            .await?
-        {
-            return Ok(());
-        }
-
-        if let Some(lan_dev) = &device.lan_device {
-            let color = crate::lan_api::DeviceColor { r, g, b };
-            log::info!("Using LAN API to set {device} color");
-            lan_dev.send_color_rgb(color).await?;
-            self.poll_lan_api(lan_dev, |status| status.color == color)
-                .await?;
-            self.device_mut(&device.sku, &device.id)
-                .await
-                .set_active_scene(None);
-            return Ok(());
-        }
-
-        if device.iot_api_supported() {
-            if let Some(iot) = self.get_iot_client().await {
-                if let Some(info) = &device.undoc_device_info {
-                    log::info!("Using IoT API to set {device} color");
-                    iot.set_color_rgb(&info.entry, r, g, b).await?;
-                    return Ok(());
-                }
-            }
-        }
-
-        if let Some(client) = self.get_platform_client().await {
-            if let Some(info) = &device.http_device_info {
-                log::info!("Using Platform API to set {device} color");
-                client.set_color_rgb(info, r, g, b).await?;
-                self.device_mut(&device.sku, &device.id)
-                    .await
-                    .set_active_scene(None);
-                return Ok(());
-            }
-        }
-        anyhow::bail!("Unable to control color for {device}");
+        self.execute_op(device, DeviceOp::SetColorRgb { r, g, b })
+            .await
     }
 
     pub async fn poll_after_control(self: &Arc<Self>, id: String) {
@@ -630,17 +471,14 @@ impl State {
         instance_name: &str,
         target: TemperatureValue,
     ) -> anyhow::Result<()> {
-        if let Some(client) = self.get_platform_client().await {
-            if let Some(info) = &device.http_device_info {
-                log::info!("Using Platform API to set {device} target temperature to {target}");
-                client
-                    .set_target_temperature(info, instance_name, target)
-                    .await?;
-                return Ok(());
-            }
-        }
-
-        anyhow::bail!("Unable to set temperature for {device}");
+        self.execute_op(
+            device,
+            DeviceOp::SetTargetTemperature {
+                instance: instance_name.to_string(),
+                target,
+            },
+        )
+        .await
     }
 
     pub async fn device_set_scene(
@@ -648,33 +486,8 @@ impl State {
         device: &Device,
         scene: &str,
     ) -> anyhow::Result<()> {
-        // TODO: some plumbing to maintain offline scene controls for preferred-LAN control
-        let avoid_platform_api = device.avoid_platform_api();
-
-        if !avoid_platform_api {
-            if let Some(client) = self.get_platform_client().await {
-                if let Some(info) = &device.http_device_info {
-                    log::info!("Using Platform API to set {device} to scene {scene}");
-                    client.set_scene_by_name(info, scene).await?;
-                    self.device_mut(&device.sku, &device.id)
-                        .await
-                        .set_active_scene(Some(scene));
-                    return Ok(());
-                }
-            }
-        }
-
-        if let Some(lan_dev) = &device.lan_device {
-            log::info!("Using LAN API to set {device} to scene {scene}");
-            lan_dev.set_scene_by_name(scene).await?;
-
-            self.device_mut(&device.sku, &device.id)
-                .await
-                .set_active_scene(Some(scene));
-            return Ok(());
-        }
-
-        anyhow::bail!("Unable to set scene for {device}");
+        self.execute_op(device, DeviceOp::SetScene(scene.to_string()))
+            .await
     }
 
     // Take care not to call this while you hold a mutable device
