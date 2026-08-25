@@ -93,10 +93,18 @@ async fn poll_via_ble(
         .await
         .set_last_polled();
 
-    scheduler
+    // A poll that cannot reach the device is an ordinary fact of life for
+    // Bluetooth: the light may be switched off at the wall, or simply out of
+    // range of every proxy. Reporting that as an error every poll interval
+    // would bury the log. The circuit breaker escalates for us once a device
+    // has failed repeatedly.
+    if let Err(err) = scheduler
         .poll(state, &device.id, &device.sku, &address)
         .await
-        .with_context(|| format!("polling {device} over BLE"))
+    {
+        log::debug!("polling {device} over BLE failed: {err:#}");
+    }
+    Ok(())
 }
 
 async fn poll_single_device(state: &StateHandle, device: &Device) -> anyhow::Result<()> {

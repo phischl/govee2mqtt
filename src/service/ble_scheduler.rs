@@ -598,13 +598,21 @@ impl BleScheduler {
         breaker.consecutive_failures += 1;
 
         if breaker.consecutive_failures >= self.config.breaker_threshold {
+            // Only announce the transition. A device that stays unreachable
+            // reopens the breaker every cooldown, and repeating the warning
+            // forever would be noise rather than information.
+            let was_open = breaker.open_until.is_some();
             breaker.open_until = Some(Instant::now() + self.config.breaker_cooldown);
-            log::warn!(
-                "BLE failed {} times for {device_id} ({reason}); \
-                 falling back to other transports for {:?}",
-                breaker.consecutive_failures,
-                self.config.breaker_cooldown
-            );
+            if !was_open {
+                log::warn!(
+                    "BLE failed {} times for {device_id} ({reason}); \
+                     setting it aside for {:?}",
+                    breaker.consecutive_failures,
+                    self.config.breaker_cooldown
+                );
+            } else {
+                log::debug!("BLE still unreachable for {device_id}: {reason}");
+            }
         } else {
             log::debug!(
                 "BLE attempt {} for {device_id} failed: {reason}",
