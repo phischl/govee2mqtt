@@ -8,7 +8,7 @@
 //! This collects the commands that arrive together, groups them by the value
 //! they ask for, and issues one request per distinct value.
 
-use crate::ble::{Base64HexBytes, SetSegmentColorRgb, GENERIC_LIGHT};
+use crate::ble::{Base64HexBytes, SetSegmentColorRgb};
 use crate::service::device::Device;
 use crate::service::state::StateHandle;
 use std::collections::HashMap;
@@ -158,6 +158,18 @@ impl SegmentBatcher {
             }
         };
 
+        // Bluetooth carries the same frames, and for a segmented device that
+        // has no cloud path it is the only thing that can. Tried after IoT
+        // because a radio session is slower and holds a proxy connection slot.
+        let colour_sent = colour_sent
+            || match self.send_rgb_via_ble(state, &device, pending).await {
+                Ok(sent) => sent,
+                Err(err) => {
+                    log::warn!("Setting segments for {device} over Bluetooth failed: {err:#}");
+                    false
+                }
+            };
+
         if pending.brightness.is_empty() && colour_sent {
             return Ok(());
         }
@@ -188,6 +200,59 @@ impl SegmentBatcher {
         }
 
         Ok(())
+    }
+
+    /// Send the batch's colours as raw frames over Bluetooth.
+    ///
+    /// Returns whether it carried them. Declines quietly when Bluetooth is off,
+    /// excluded for this device, the executor is absent, or the circuit breaker
+    /// is open — those are routing decisions, and the Platform API is still
+    /// there.
+    async fn send_rgb_via_ble(
+        &self,
+        state: &StateHandle,
+        device: &Device,
+        pending: &Pending,
+    ) -> anyhow::Result<bool> {
+        if pending.rgb.is_empty() {
+            return Ok(true);
+        }
+
+        let Some(scheduler) = state.get_ble_scheduler().await else {
+            return Ok(false);
+        };
+        let Some(address) = scheduler.address_for(device) else {
+            return Ok(false);
+        };
+        if !scheduler.is_available_for(device).await {
+            return Ok(false);
+        }
+
+        let frames = Self::encode_rgb(pending)?;
+        let count: usize = pending.rgb.values().map(Vec::len).sum();
+        log::info!(
+            "Using Bluetooth to set {count} segment colour(s) on {device} in one session, \
+             {} frame(s)",
+            frames.len()
+        );
+
+        scheduler
+            .send_frames(state, &device.id, &device.sku, &address, &frames)
+            .await?;
+        Ok(true)
+    }
+
+    /// One frame per distinct colour, each naming its own segments.
+    fn encode_rgb(pending: &Pending) -> anyhow::Result<Vec<Vec<u8>>> {
+        pending
+            .rgb
+            .iter()
+            .map(|((r, g, b), segments)| {
+                let command =
+                    SetSegmentColorRgb::for_segments(segments.iter().copied(), (*r, *g, *b))?;
+                crate::ble::encode_for_generic_light(&command)
+            })
+            .collect()
     }
 
     /// Send the batch's colours as raw frames over AWS IoT.
@@ -221,9 +286,8 @@ impl SegmentBatcher {
         }
 
         let mut frames = vec![];
-        for ((r, g, b), segments) in &pending.rgb {
-            let command = SetSegmentColorRgb::for_segments(segments.iter().copied(), (*r, *g, *b))?;
-            frames.extend(Base64HexBytes::encode_for_sku(GENERIC_LIGHT, &command)?.base64());
+        for raw in Self::encode_rgb(pending)? {
+            frames.extend(Base64HexBytes::with_bytes(raw).base64());
         }
 
         let count: usize = pending.rgb.values().map(Vec::len).sum();
@@ -265,6 +329,29 @@ mod test {
         pending.add(0, Some(50), Some((255, 255, 255)));
 
         assert_eq!(pending.request_count(), 2);
+    }
+
+    /// One encoder feeds both channels: the bytes that go out over the radio
+    /// are the same bytes that go out base64-wrapped over AWS IoT.
+    #[test]
+    fn each_distinct_colour_becomes_one_frame() {
+        let mut pending = Pending::default();
+        pending.add(0, None, Some((0, 0, 255)));
+        pending.add(1, None, Some((0, 0, 255)));
+        pending.add(5, None, Some((255, 255, 255)));
+
+        let frames = SegmentBatcher::encode_rgb(&pending).unwrap();
+        assert_eq!(frames.len(), 2, "one frame per distinct colour");
+
+        // Both are the segment colour command, and every mask bit set is one
+        // of the segments that asked for that colour.
+        for frame in &frames {
+            assert_eq!(&frame[..4], &[0x33, 0x05, 0x15, 0x01]);
+            let colour = (frame[4], frame[5], frame[6]);
+            let mask = frame[12];
+            let expected: u8 = pending.rgb[&colour].iter().map(|n| 1u8 << n).sum();
+            assert_eq!(mask, expected, "mask for {colour:?}");
+        }
     }
 
     /// Once AWS IoT has carried the colours, only brightness is left for the

@@ -553,6 +553,37 @@ impl BleScheduler {
             .await
     }
 
+    /// Send frames a caller has already encoded, in one radio session.
+    ///
+    /// The scheduler's own path builds frames from `DeviceOp`s, which cover the
+    /// whole-device attributes. Segment colour does not fit that shape — it
+    /// carries a set of segment indices rather than one value — and it is
+    /// batched a layer above, in `service::segments`. Rather than teach
+    /// `DeviceOp` about segments, that layer encodes and hands the frames over.
+    ///
+    /// Failures count against the device's circuit breaker exactly as a normal
+    /// session would, so a device that cannot be reached stops being tried.
+    pub async fn send_frames(
+        &self,
+        state: &StateHandle,
+        device_id: &str,
+        sku: &str,
+        address: &str,
+        frames: &[Vec<u8>],
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(!frames.is_empty(), "nothing to send");
+
+        let result = self
+            .exchange(state, device_id, sku, address, frames, &[], "user")
+            .await;
+
+        match &result {
+            Ok(()) => self.note_success(device_id).await,
+            Err(err) => self.note_failure(device_id, err).await,
+        }
+        result
+    }
+
     /// Read a device's current state without changing anything.
     pub async fn poll(
         &self,

@@ -842,6 +842,34 @@ pub fn query_device_brightness() -> Base64HexBytes {
     Base64HexBytes::with_bytes(vec![0xaa, 0x04])
 }
 
+/// Encode a light command into the raw 20 bytes that travel over either
+/// channel — the radio directly, or base64-wrapped as `ptReal` over LAN and
+/// AWS IoT. Every light codec lives under `GENERIC_LIGHT` rather than a SKU,
+/// which is easy to get wrong at the call site; this says it once.
+pub fn encode_for_generic_light<T: 'static>(value: &T) -> anyhow::Result<Vec<u8>> {
+    MGR.encode_for_sku(GENERIC_LIGHT, value)
+}
+
+/// Ask the device to report one page of segment colours.
+///
+/// Confirmed on an H6072 on 2026-08-25: sending `aa a5 02` came back as
+/// `aa a5 02 <three segment groups>` two seconds before any status request, so
+/// this is a query in its own right and not merely the shape of a status
+/// reply. It makes segment state live over Bluetooth rather than tied to the
+/// AWS IoT poll interval, and it is the only way a Bluetooth-only segmented
+/// device can tell us how many segments it has.
+///
+/// Pages are numbered from 1; page P covers segments from
+/// `(P - 1) * stride`, where the stride is the device's own — see
+/// `NotifySegmentColors::groups_used`.
+// Verified against hardware but not yet wired up: reading segments back in the
+// session that wrote them needs a `Query` variant in the BLE scheduler, which
+// is its own change. Kept here so the measurement is not lost.
+#[allow(dead_code)]
+pub fn query_segment_colors(page: u8) -> Base64HexBytes {
+    Base64HexBytes::with_bytes(vec![0xaa, 0xa5, page.max(1)])
+}
+
 /// Ask the device to report its colour and colour temperature.
 ///
 /// Unlike the other queries this one carries 0x01 rather than 0x00 in the third
@@ -1274,6 +1302,22 @@ a3 ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5c
                 GoveeBlePacket::SetSegmentColorRgb(value),
             );
         }
+    }
+
+    /// The exact bytes an H6072 answered.
+    #[test]
+    fn the_segment_query_matches_what_the_device_answered() {
+        assert_eq!(
+            hex(&query_segment_colors(1)),
+            "aaa501000000000000000000000000000000000e"
+        );
+        assert_eq!(
+            hex(&query_segment_colors(2)),
+            "aaa502000000000000000000000000000000000d"
+        );
+
+        // Page numbers start at 1; 0 would collide with page 1's segments.
+        assert_eq!(hex(&query_segment_colors(0)), hex(&query_segment_colors(1)));
     }
 
     /// The frame has room for seven mask bytes and no more.
