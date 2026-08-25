@@ -108,7 +108,7 @@ if bashio::config.has_value ble_address_map ; then
 fi
 
 for interval in poll_interval poll_interval_lan poll_interval_iot \
-                poll_interval_platform poll_interval_ble ; do
+                poll_interval_platform poll_interval_ble poll_after_control ; do
   if bashio::config.has_value "$interval" ; then
     export "GOVEE_$(echo "$interval" | tr '[:lower:]' '[:upper:]')=$(bashio::config "$interval")"
   fi

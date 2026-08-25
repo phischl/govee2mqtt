@@ -101,6 +101,7 @@ A single number would force those against each other.
 |`--poll-interval-iot`|`GOVEE_POLL_INTERVAL_IOT=900`|`poll_interval_iot`|Seconds between AWS IoT status requests. Defaults to `--poll-interval`.|
 |`--poll-interval-platform`|`GOVEE_POLL_INTERVAL_PLATFORM=1800`|`poll_interval_platform`|Seconds between Platform API polls. Defaults to `--poll-interval`.|
 |`--poll-interval-ble`|`GOVEE_POLL_INTERVAL_BLE=900`|`poll_interval_ble`|Seconds between Bluetooth polls of Bluetooth-only devices. Defaults to `--poll-interval`.|
+|`--poll-after-control`|`GOVEE_POLL_AFTER_CONTROL=5`|`poll_after_control`|Seconds to wait after a command before reading the device back. Defaults to 5.|
 
 The poll loop runs at the shortest configured interval, bounded to between 5 and
 30 seconds, so a short interval is honoured rather than silently rounded up to a
@@ -126,6 +127,16 @@ fall back on. If you are near the limit, raising the interval is the only lever.
 devices are polled this way; anything with a LAN or cloud presence is left to
 those, because its Bluetooth writes are already verified inside the session that
 issued them.
+
+**A light briefly shows its old state after you change it.** Raise
+`poll_after_control`. Every command is followed by a read-back, because neither
+cloud path confirms that the device acted: the Platform API's status is not
+guaranteed to be coherent with a command issued a moment earlier, and an AWS IoT
+command is never acknowledged at all — the broker accepts the publish and says
+nothing more. The read-back uses the same channel the device is reachable on, so
+for an IoT device it costs no Platform API quota. Bluetooth is exempt: a session
+already reads back the attributes it changed, and LAN is exempt because it
+verifies its own writes.
 
 **A device flickers about a minute after Home Assistant starts talking to it.**
 That is [known Govee firmware behaviour](https://github.com/wez/govee2mqtt/issues/250)

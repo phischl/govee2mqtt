@@ -181,3 +181,12 @@ configuration:
       Each poll occupies a proxy connection slot for a second or two, so a
       short interval on many devices keeps the proxies busy. Defaults to the
       general poll interval.
+  poll_after_control:
+    name: Read back delay after a command (seconds)
+    description: >-
+      How long to wait after sending a command before asking the device what it
+      actually did. Default 5. Govee's cloud does not always report the new
+      state immediately, and commands sent over the AWS IoT channel are never
+      acknowledged at all, so this read-back is the only confirmation that path
+      offers. Raise it if a light briefly shows its previous state in Home
+      Assistant after you change it.

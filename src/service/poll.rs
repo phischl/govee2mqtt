@@ -18,6 +18,11 @@ pub const DEFAULT_INTERVAL: Duration = Duration::from_secs(900);
 /// predictable rather than random (upstream issue #250).
 pub const DEFAULT_LAN_INTERVAL: Duration = Duration::from_secs(30);
 
+/// How long to wait after a command before asking what the device actually did.
+/// Long enough for it to have acted, short enough that Home Assistant is not
+/// showing the old state while someone watches the light change.
+pub const DEFAULT_AFTER_CONTROL_DELAY: Duration = Duration::from_secs(5);
+
 /// The poll loop cannot honour an interval shorter than its own tick, so the
 /// tick follows the shortest configured interval — down to this floor.
 pub const MIN_TICK: Duration = Duration::from_secs(5);
@@ -61,6 +66,13 @@ pub struct PollArguments {
     /// You may also set this via the GOVEE_POLL_INTERVAL_BLE environment variable.
     #[arg(long, global = true, value_name = "SECONDS")]
     poll_interval_ble: Option<u64>,
+
+    /// Seconds to wait after a command before reading the device back. Raise it
+    /// if a device reports its previous state right after being told to change.
+    /// Default 5.
+    /// You may also set this via the GOVEE_POLL_AFTER_CONTROL environment variable.
+    #[arg(long, global = true, value_name = "SECONDS")]
+    poll_after_control: Option<u64>,
 }
 
 impl PollArguments {
@@ -75,6 +87,8 @@ impl PollArguments {
             platform: resolve(self.poll_interval_platform, "GOVEE_POLL_INTERVAL_PLATFORM")?
                 .unwrap_or(general),
             ble: resolve(self.poll_interval_ble, "GOVEE_POLL_INTERVAL_BLE")?.unwrap_or(general),
+            after_control: resolve(self.poll_after_control, "GOVEE_POLL_AFTER_CONTROL")?
+                .unwrap_or(DEFAULT_AFTER_CONTROL_DELAY),
         })
     }
 }
@@ -106,6 +120,9 @@ pub struct PollIntervals {
     pub iot: Duration,
     pub platform: Duration,
     pub ble: Duration,
+    /// Not an interval but a one-off delay; it lives here because it is the
+    /// same question — how long before we believe a device about its state.
+    pub after_control: Duration,
 }
 
 impl Default for PollIntervals {
@@ -115,6 +132,7 @@ impl Default for PollIntervals {
             iot: DEFAULT_INTERVAL,
             platform: DEFAULT_INTERVAL,
             ble: DEFAULT_INTERVAL,
+            after_control: DEFAULT_AFTER_CONTROL_DELAY,
         }
     }
 }
@@ -161,11 +179,12 @@ impl PollIntervals {
 
     pub fn describe(&self) -> String {
         format!(
-            "lan={}s iot={}s platform={}s ble={}s (loop tick {}s)",
+            "lan={}s iot={}s platform={}s ble={}s after-control={}s (loop tick {}s)",
             self.lan.as_secs(),
             self.iot.as_secs(),
             self.platform.as_secs(),
             self.ble.as_secs(),
+            self.after_control.as_secs(),
             self.tick().as_secs()
         )
     }
@@ -202,6 +221,7 @@ mod test {
             iot: Duration::from_secs(3600),
             platform: Duration::from_secs(3600),
             ble: Duration::from_secs(3600),
+            ..Default::default()
         };
         assert_eq!(intervals.tick(), MAX_TICK);
     }
@@ -213,6 +233,18 @@ mod test {
         assert_eq!(intervals.iot, Duration::from_secs(900));
         assert_eq!(intervals.platform, Duration::from_secs(900));
         assert_eq!(intervals.ble, Duration::from_secs(900));
+        assert_eq!(intervals.tick(), Duration::from_secs(30));
+        assert_eq!(intervals.after_control, Duration::from_secs(5));
+    }
+
+    /// The post-control delay is not a polling interval and must not drag the
+    /// loop tick down to five seconds.
+    #[test]
+    fn the_after_control_delay_does_not_affect_the_tick() {
+        let intervals = PollIntervals {
+            after_control: Duration::from_secs(1),
+            ..Default::default()
+        };
         assert_eq!(intervals.tick(), Duration::from_secs(30));
     }
 

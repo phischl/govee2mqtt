@@ -5,6 +5,7 @@ use crate::service::coordinator::Coordinator;
 use crate::service::device::Device;
 use crate::service::hass::{topic_safe_id, HassClient};
 use crate::service::iot::IotClient;
+use crate::service::poll::PollIntervals;
 use crate::service::segments::SegmentBatcher;
 use crate::service::transport::{self, DeviceOp, TransportId};
 use crate::temperature::{TemperatureScale, TemperatureValue};
@@ -459,20 +460,45 @@ impl State {
             return;
         }
 
-        let iot_available = self.get_iot_client().await.is_some();
-
-        if device.pollable_via_iot() && iot_available {
-            return;
-        }
+        // The LAN path verifies its own writes, so there is nothing to add.
         if device.pollable_via_lan() {
             return;
         }
 
-        // Add a slight delay, as the status returned
-        // by the platform API isn't guaranteed to be
-        // coherent with the command we just issued
-        // right away :-/
-        sleep(Duration::from_secs(5)).await;
+        // Give the device time to act, and Govee's API time to agree that it
+        // did: a status read immediately after a command is not guaranteed to
+        // be coherent with it.
+        let delay = PollIntervals::configured().after_control;
+
+        let iot_available = self.get_iot_client().await.is_some();
+        if device.pollable_via_iot() && iot_available {
+            // AWS IoT commands are fire and forget: the broker accepts the
+            // publish and never says whether the device acted on it. This used
+            // to return without polling, on the assumption that the device
+            // would volunteer its new state. It does so for the whole-device
+            // attributes, but not for everything -- per-segment colours are
+            // only ever reported when asked (see CLAUDE.md section 17) -- and a
+            // command that quietly did nothing would leave Home Assistant
+            // showing a state the light never reached.
+            //
+            // Asking costs nothing on this channel: no Platform API quota, and
+            // a connection we already hold.
+            sleep(delay).await;
+
+            log::debug!("Requesting IoT status for {device} after control");
+            match self.poll_iot_api(&device).await {
+                Ok(true) => return,
+                // Could not publish after all; the Platform API below is the
+                // remaining way to find out what happened.
+                Ok(false) => {}
+                Err(err) => {
+                    log::error!("Requesting IoT status for {device} failed: {err:#}");
+                    return;
+                }
+            }
+        } else {
+            sleep(delay).await;
+        }
 
         log::info!("Polling {device} to get latest state after control");
         if let Err(err) = self.poll_platform_api(&device).await {
