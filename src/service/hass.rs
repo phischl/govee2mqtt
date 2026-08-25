@@ -369,38 +369,26 @@ async fn mqtt_light_segment_command(
     let command: HassLightCommand = from_json(&payload)?;
     log::info!("Command for {device} segment {segment}: {payload}");
 
-    if let Some(client) = state.get_platform_client().await {
-        let info = device
-            .http_device_info
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("HTTP device info is missing"))?;
-
-        log::info!("Using Platform API to control {device} segment");
-
-        if let Some(brightness) = command.brightness {
-            client
-                .set_segment_brightness(info, segment, brightness)
-                .await?;
-        } else if command.state == "OFF" {
-            // Do nothing here. We used to set brightness to zero,
-            // but it is problematic:
-            // * Some devices don't have a 0
-            // * Setting it to 0 will power up the rest of the device,
-            //   so if HASS is turning off all lights in an area, the
-            //   effect is that they will turn off and then immediate
-            //   on again when there are segments involved
-            // client.set_segment_brightness(&info, segment, 0).await?;
-        }
-        if let Some(color) = &command.color {
-            client
-                .set_segment_rgb(info, segment, color.r, color.g, color.b)
-                .await?;
-        }
+    // Switching a segment off is deliberately not brightness 0: some devices
+    // have no 0, and on those that do it powers the whole device up, so turning
+    // off an area would flick everything back on. Black is the equivalent that
+    // does not have that side effect.
+    let rgb = match (&command.color, command.state.as_str()) {
+        (Some(color), _) => Some((color.r, color.g, color.b)),
+        (None, "OFF") => Some((0, 0, 0)),
+        (None, _) => None,
+    };
+    let brightness = if command.state == "OFF" {
+        None
     } else {
-        anyhow::bail!("set segments for {device}: Platform API is not available");
-    }
+        command.brightness
+    };
 
-    Ok(())
+    state
+        .segment_batcher()
+        .clone()
+        .apply(&state, &device, segment, brightness, rgb)
+        .await
 }
 
 async fn mqtt_ble_response(

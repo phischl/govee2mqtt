@@ -5,6 +5,7 @@ use crate::service::coordinator::Coordinator;
 use crate::service::device::Device;
 use crate::service::hass::{topic_safe_id, HassClient};
 use crate::service::iot::IotClient;
+use crate::service::segments::SegmentBatcher;
 use crate::service::transport::{self, DeviceOp, TransportId};
 use crate::temperature::{TemperatureScale, TemperatureValue};
 use crate::undoc_api::GoveeUndocumentedApi;
@@ -28,6 +29,7 @@ pub struct State {
     hass_discovery_prefix: Mutex<String>,
     temperature_scale: Mutex<TemperatureScale>,
     ble_scheduler: Mutex<Option<Arc<BleScheduler>>>,
+    segment_batcher: Arc<SegmentBatcher>,
     /// Optional configured transport priority prefix; see `service::transport`.
     transport_order: Mutex<Option<Vec<TransportId>>>,
 }
@@ -52,6 +54,12 @@ impl State {
     #[allow(dead_code)]
     pub async fn set_ble_scheduler(&self, scheduler: Arc<BleScheduler>) {
         self.ble_scheduler.lock().await.replace(scheduler);
+    }
+
+    /// Collects per-segment commands so that segments sharing a value travel
+    /// in one request instead of one apiece.
+    pub fn segment_batcher(&self) -> &Arc<SegmentBatcher> {
+        &self.segment_batcher
     }
 
     pub async fn get_ble_scheduler(&self) -> Option<Arc<BleScheduler>> {

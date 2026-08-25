@@ -485,10 +485,14 @@ impl GoveeApiClient {
         self.control_device(device, cap, value).await
     }
 
+    /// Set the colour of one or more segments.
+    ///
+    /// Govee takes an array here, so a set of segments sharing a colour costs a
+    /// single request rather than one apiece. Upstream always sent one.
     pub async fn set_segment_rgb(
         &self,
         device: &HttpDeviceInfo,
-        segment: u32,
+        segments: &[u32],
         r: u8,
         g: u8,
         b: u8,
@@ -501,17 +505,21 @@ impl GoveeApiClient {
             device,
             cap,
             json!({
-                "segment": vec![segment],
+                "segment": segments,
                 "rgb": value,
             }),
         )
         .await
     }
 
+    /// Set the brightness of one or more segments.
+    ///
+    /// Govee takes an array here, so a set of segments sharing a value costs a
+    /// single request rather than one apiece.
     pub async fn set_segment_brightness(
         &self,
         device: &HttpDeviceInfo,
-        segment: u32,
+        segments: &[u32],
         percent: u8,
     ) -> anyhow::Result<ControlDeviceResponseCapability> {
         let cap = device
@@ -528,7 +536,7 @@ impl GoveeApiClient {
             device,
             cap,
             json!({
-                "segment": vec![segment],
+                "segment": segments,
                 "brightness": value,
             }),
         )
