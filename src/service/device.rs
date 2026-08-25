@@ -209,7 +209,22 @@ impl Device {
     /// running picture instead of replacing it. `apply` is handed the current
     /// status to modify.
     pub fn update_ble_device_status<F: FnOnce(&mut LanDeviceStatus)>(&mut self, apply: F) -> bool {
-        let mut status = self.ble_device_status.clone().unwrap_or_default();
+        let mut status = match &self.ble_device_status {
+            Some(status) => status.clone(),
+            // Seed from whatever we last knew rather than from zeroes. A session
+            // only reads back the attributes it changed, so switching a light on
+            // would otherwise report brightness 0 and colour black as though we
+            // had measured them.
+            None => self
+                .device_state()
+                .map(|state| LanDeviceStatus {
+                    on: state.on,
+                    brightness: state.brightness,
+                    color: state.color,
+                    color_temperature_kelvin: state.kelvin,
+                })
+                .unwrap_or_default(),
+        };
         (apply)(&mut status);
 
         let changed = self.ble_device_status.as_ref() != Some(&status);
@@ -669,6 +684,16 @@ impl Device {
             .map(|info| info.entry.device_ext.device_settings.wifi_name.is_none())
     }
 
+    /// Whether Bluetooth reported this device's state within `window`.
+    ///
+    /// Used to skip the post-control cloud poll: a BLE session reads back what
+    /// it changed, so polling again would spend a cloud request on something we
+    /// already know.
+    pub fn has_fresh_ble_state(&self, window: chrono::Duration) -> bool {
+        self.last_ble_device_status_update
+            .is_some_and(|updated| Utc::now() - updated < window)
+    }
+
     pub fn is_controllable(&self) -> bool {
         if !matches!(self.is_ble_only_device(), Some(true)) {
             return true;
@@ -730,6 +755,38 @@ mod test {
         let status = device.ble_device_status.as_ref().unwrap();
         assert_eq!(status.brightness, 42);
         assert!(status.on);
+    }
+
+    #[test]
+    fn a_first_ble_update_inherits_what_we_already_knew() {
+        // A session that only switches a light on reads back power alone. The
+        // attributes it did not ask about must keep their known values rather
+        // than appear as measured zeroes.
+        let mut device = Device::new("H601B", "AA:BB:CC:DD:EE:FF:11:22");
+        device.set_lan_device_status(LanDeviceStatus {
+            on: false,
+            brightness: 80,
+            color: DeviceColor { r: 1, g: 2, b: 3 },
+            color_temperature_kelvin: 2700,
+        });
+
+        device.update_ble_device_status(|status| status.on = true);
+
+        let status = device.ble_device_status.as_ref().unwrap();
+        assert!(status.on);
+        assert_eq!(status.brightness, 80);
+        assert_eq!(status.color, DeviceColor { r: 1, g: 2, b: 3 });
+        assert_eq!(status.color_temperature_kelvin, 2700);
+    }
+
+    #[test]
+    fn ble_freshness_gates_the_post_control_poll() {
+        let mut device = Device::new("H601B", "AA:BB:CC:DD:EE:FF:11:22");
+        assert!(!device.has_fresh_ble_state(chrono::Duration::seconds(15)));
+
+        device.update_ble_device_status(|status| status.on = true);
+        assert!(device.has_fresh_ble_state(chrono::Duration::seconds(15)));
+        assert!(!device.has_fresh_ble_state(chrono::Duration::zero()));
     }
 
     #[test]

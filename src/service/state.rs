@@ -426,6 +426,12 @@ impl State {
             return;
         };
 
+        // A Bluetooth session reads back the attributes it changed, so a cloud
+        // poll on top of it would spend a request confirming what we just read.
+        if device.has_fresh_ble_state(chrono::Duration::seconds(15)) {
+            return;
+        }
+
         let iot_available = self.get_iot_client().await.is_some();
 
         if device.pollable_via_iot() && iot_available {
