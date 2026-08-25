@@ -236,8 +236,9 @@ impl SegmentBatcher {
             frames.len()
         );
 
+        let touched: Vec<u32> = pending.rgb.values().flatten().copied().collect();
         scheduler
-            .send_frames(state, &device.id, &device.sku, &address, &frames)
+            .send_frames(state, &device.id, &device.sku, &address, &frames, &touched)
             .await?;
         Ok(true)
     }

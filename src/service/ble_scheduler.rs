@@ -17,8 +17,9 @@
 
 use crate::ble::{
     decode_notification, query_device_brightness, query_device_color, query_device_power,
-    Base64HexBytes, GoveeBlePacket, Kelvin, SetDeviceBrightness, SetDeviceColorRgb,
-    SetDeviceColorTemperature, SetDevicePower, GENERIC_LIGHT,
+    query_segment_colors, Base64HexBytes, GoveeBlePacket, Kelvin, NotifySegmentColors,
+    SetDeviceBrightness, SetDeviceColorRgb, SetDeviceColorTemperature, SetDevicePower,
+    GENERIC_LIGHT, SEGMENTS_PER_PAGE,
 };
 use crate::lan_api::DeviceColor;
 use crate::service::ble_bridge::{
@@ -319,16 +320,42 @@ enum Query {
     Power,
     Brightness,
     Color,
+    /// One page of segment colours. Pages are numbered from 1 and a device
+    /// answers only for pages it has, so asking past the end is how the extent
+    /// is discovered rather than an error.
+    Segments(u8),
 }
 
 impl Query {
     const ALL: [Query; 3] = [Query::Power, Query::Brightness, Query::Color];
+
+    /// The segment pages that would carry these segment indices.
+    ///
+    /// Asked with the common three-per-page stride: a device that packs four
+    /// answers with its own layout anyway, and `Device::set_segment_colors`
+    /// works the stride out from the reply. Bounded, because each query is a
+    /// write plus a notify round trip and a scene should not turn into a long
+    /// radio session.
+    fn pages_covering(segments: &[u32]) -> Vec<Query> {
+        const MAX_PAGES: usize = 4;
+
+        let mut pages: Vec<u8> = segments
+            .iter()
+            .map(|segment| (segment / SEGMENTS_PER_PAGE as u32 + 1) as u8)
+            .collect();
+        pages.sort_unstable();
+        pages.dedup();
+        pages.truncate(MAX_PAGES);
+
+        pages.into_iter().map(Query::Segments).collect()
+    }
 
     fn frame(&self) -> anyhow::Result<Vec<u8>> {
         let encoded = match self {
             Self::Power => query_device_power(),
             Self::Brightness => query_device_brightness(),
             Self::Color => query_device_color(),
+            Self::Segments(page) => query_segment_colors(*page),
         };
         let mut chunks = encoded.base64();
         anyhow::ensure!(chunks.len() == 1, "a query should be a single frame");
@@ -570,11 +597,13 @@ impl BleScheduler {
         sku: &str,
         address: &str,
         frames: &[Vec<u8>],
+        read_back: &[u32],
     ) -> anyhow::Result<()> {
         anyhow::ensure!(!frames.is_empty(), "nothing to send");
 
+        let queries = Query::pages_covering(read_back);
         let result = self
-            .exchange(state, device_id, sku, address, frames, &[], "user")
+            .exchange(state, device_id, sku, address, frames, &queries, "user")
             .await;
 
         match &result {
@@ -723,6 +752,10 @@ impl BleScheduler {
         results: &[JobResult],
     ) {
         let mut changed = false;
+        // Collected rather than applied one at a time: how many segments a page
+        // carries can only be read from the whole set, see
+        // `Device::set_segment_colors`.
+        let mut segment_pages: Vec<NotifySegmentColors> = vec![];
 
         for result in results.iter().filter(|result| result.kind == "notify") {
             let Some(encoded) = &result.data else {
@@ -757,10 +790,21 @@ impl BleScheduler {
                             color.kelvin.get().map(u32::from).unwrap_or(0);
                     });
                 }
+                GoveeBlePacket::NotifySegmentColors(page) => {
+                    segment_pages.push(page);
+                }
                 other => {
                     log::debug!("unhandled BLE notification from {device_id}: {other:?}");
                 }
             }
+        }
+
+        if !segment_pages.is_empty() {
+            state
+                .device_mut(sku, device_id)
+                .await
+                .set_segment_colors(&segment_pages);
+            changed = true;
         }
 
         if !changed {
@@ -841,6 +885,27 @@ impl BleScheduler {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    /// A scene touching a few segments must not turn into a long radio
+    /// session: each query is a write plus a notify round trip.
+    #[test]
+    fn segment_read_back_asks_for_each_page_once() {
+        // Segments 0..=2 share page 1, 3..=5 page 2.
+        let queries = Query::pages_covering(&[0, 1, 4]);
+        assert_eq!(queries, vec![Query::Segments(1), Query::Segments(2)]);
+
+        // Duplicates within a page collapse.
+        assert_eq!(Query::pages_covering(&[6, 7, 8]), vec![Query::Segments(3)]);
+
+        // And the count is bounded however wide the scene.
+        assert_eq!(Query::pages_covering(&(0..90).collect::<Vec<_>>()).len(), 4);
+    }
+
+    /// Nothing written means nothing to verify.
+    #[test]
+    fn nothing_touched_asks_nothing() {
+        assert!(Query::pages_covering(&[]).is_empty());
+    }
 
     fn scheduler() -> BleScheduler {
         BleScheduler::new(
