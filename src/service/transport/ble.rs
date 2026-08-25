@@ -1,16 +1,21 @@
 //! Bluetooth LE, executed by the `govee_ble_executor` Home Assistant integration.
 //!
-//! Sits first in the transport order for the operations it understands, so that
-//! a device within range of a proxy is driven locally rather than through
-//! Govee's cloud. Unlike the other transports it opts into falling through on
-//! error: a radio link that fails should hand over to the cloud, not surface as
-//! a failed command.
+//! Sits *last* in the default transport order (D2b): the proven paths are
+//! faster and LAN is the only one that verifies its own work. Being last costs
+//! nothing for a Bluetooth-only device, because every other transport declines
+//! and this one serves it anyway.
+//!
+//! Unlike the other transports it opts into falling through on error: a radio
+//! link that fails should hand over to the cloud, not surface as a failed
+//! command.
 
 use super::{DeviceOp, Handled, Transport, TransportId};
 use crate::platform_api::DeviceType;
+use crate::service::ble_scheduler::BleScheduler;
 use crate::service::device::Device;
 use crate::service::state::StateHandle;
 use async_trait::async_trait;
+use std::sync::Arc;
 
 pub struct BleTransport;
 
@@ -34,19 +39,12 @@ impl BleTransport {
         )
     }
 
-    /// The scheduler and address, if Bluetooth is worth attempting at all.
+    /// What it takes to run a session, if Bluetooth is worth attempting at all.
     ///
     /// Being excluded by configuration, the executor being offline, or this
     /// device having failed repeatedly, is a routing decision rather than an
     /// error: say so quietly and let the next transport have it.
-    async fn context(
-        &self,
-        state: &StateHandle,
-        device: &Device,
-    ) -> Option<(
-        std::sync::Arc<crate::service::ble_scheduler::BleScheduler>,
-        String,
-    )> {
+    async fn route(state: &StateHandle, device: &Device) -> Option<Route> {
         // Only lights speak the command set we have codecs for. Humidifiers and
         // the like keep their existing transports.
         if !matches!(device.device_type(), DeviceType::Light) {
@@ -60,8 +58,14 @@ impl BleTransport {
             return None;
         }
 
-        Some((scheduler, address))
+        Some(Route { scheduler, address })
     }
+}
+
+/// A device we can reach right now, and the scheduler that will do it.
+struct Route {
+    scheduler: Arc<BleScheduler>,
+    address: String,
 }
 
 #[async_trait]
@@ -74,24 +78,15 @@ impl Transport for BleTransport {
         true
     }
 
+    /// A single operation is just a batch of one; the work is the same.
     async fn try_execute(
         &self,
         state: &StateHandle,
         device: &Device,
         op: &DeviceOp,
     ) -> anyhow::Result<Handled> {
-        if !Self::handles(device, op) {
-            return Ok(Handled::NotSupported);
-        }
-
-        let Some((scheduler, address)) = self.context(state, device).await else {
-            return Ok(Handled::NotSupported);
-        };
-
-        scheduler
-            .apply(state, device, &address, std::slice::from_ref(op))
-            .await?;
-        Ok(Handled::Yes)
+        self.try_execute_batch(state, device, std::slice::from_ref(op))
+            .await
     }
 
     /// The whole point of the batch path: every operation in one radio session.
@@ -107,12 +102,14 @@ impl Transport for BleTransport {
             return Ok(Handled::NotSupported);
         }
 
-        let Some(context) = self.context(state, device).await else {
+        let Some(route) = Self::route(state, device).await else {
             return Ok(Handled::NotSupported);
         };
-        let (scheduler, address) = context;
 
-        scheduler.apply(state, device, &address, ops).await?;
+        route
+            .scheduler
+            .apply(state, device, &route.address, ops)
+            .await?;
         Ok(Handled::Yes)
     }
 }

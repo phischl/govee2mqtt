@@ -24,7 +24,7 @@ use crate::lan_api::DeviceColor;
 use crate::service::ble_bridge::{
     BleBridge, ErrorKind, JobOp, JobRequest, JobResult, QuerySpec, WriteSpec,
 };
-use crate::service::device::Device;
+use crate::service::device::{BleAddressSource, Device};
 use crate::service::hass::topic_safe_id;
 use crate::service::state::StateHandle;
 use crate::service::transport::DeviceOp;
@@ -125,6 +125,29 @@ impl BleAddressOverrides {
     pub fn entries(&self) -> usize {
         self.by_device_id.len()
     }
+}
+
+/// The executor answered, and said no.
+///
+/// Carried as a typed error so the circuit breaker can tell a device that is
+/// not answering from one that refused quickly. It used to substring-match the
+/// formatted message, which happened to work only because `ErrorKind`'s derived
+/// `Debug` spelled the variant the same way.
+#[derive(Debug, thiserror::Error)]
+#[error("{kind:?}: {message}")]
+pub struct JobFailed {
+    pub kind: ErrorKind,
+    pub message: String,
+}
+
+/// We gave up waiting for a session slot and never reached the radio.
+///
+/// Deliberately distinct from a device failure: nothing was learned about the
+/// device, so it must not count towards its circuit breaker.
+#[derive(Debug, thiserror::Error)]
+#[error("all {slots} BLE session slot(s) are busy")]
+pub struct NoSessionSlot {
+    pub slots: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -334,7 +357,7 @@ struct DeviceQueue {
     flush_scheduled: bool,
 }
 
-#[derive(Default, Debug)]
+#[derive(Clone, Copy, Default, Debug)]
 struct Breaker {
     consecutive_failures: u32,
     open_until: Option<Instant>,
@@ -430,7 +453,28 @@ impl BleScheduler {
 
         rx.await
             .map_err(|_| anyhow::anyhow!("BLE session for {device} was dropped"))?
-            .map_err(|err| anyhow::anyhow!("{err}"))
+            .map_err(|err| anyhow::anyhow!("{err}{}", self.address_note(device)))
+    }
+
+    /// A parenthetical naming the address we used, when it was a guess.
+    ///
+    /// Govee states an address for most devices, but not all, and the fallback
+    /// derived from the device id is reliably one too low for the H601B family.
+    /// A failure on a guessed address looks exactly like a device that is out
+    /// of range, so the message has to say which one it was — that ambiguity
+    /// cost an afternoon once already.
+    fn address_note(&self, device: &Device) -> String {
+        if self.config.address_overrides.get(&device.id).is_some() {
+            return String::new();
+        }
+
+        match device.ble_address_with_source() {
+            Some((address, BleAddressSource::DerivedFromId)) => format!(
+                " (address {address} was guessed from the device id; \
+                 correct it with --ble-address-map if that is wrong)"
+            ),
+            _ => String::new(),
+        }
     }
 
     async fn flush_after_window(
@@ -463,7 +507,7 @@ impl BleScheduler {
 
         match &result {
             Ok(()) => self.note_success(&device_id).await,
-            Err(err) => self.note_failure(&device_id, &err.to_string()).await,
+            Err(err) => self.note_failure(&device_id, err).await,
         }
 
         let outcome = result.map_err(|err| err.to_string());
@@ -523,7 +567,7 @@ impl BleScheduler {
 
         match &result {
             Ok(()) => self.note_success(device_id).await,
-            Err(err) => self.note_failure(device_id, &err.to_string()).await,
+            Err(err) => self.note_failure(device_id, err).await,
         }
         result
     }
@@ -596,10 +640,12 @@ impl BleScheduler {
         let _permit = match tokio::time::timeout(self.config.permit_wait, self.gate.acquire()).await
         {
             Ok(permit) => permit?,
-            Err(_) => anyhow::bail!(
-                "all {} BLE session slot(s) are busy",
-                self.config.max_concurrent
-            ),
+            Err(_) => {
+                return Err(NoSessionSlot {
+                    slots: self.config.max_concurrent,
+                }
+                .into())
+            }
         };
 
         log::debug!(
@@ -613,7 +659,11 @@ impl BleScheduler {
             let error = response
                 .error
                 .ok_or_else(|| anyhow::anyhow!("BLE job {job_id} failed without saying why"))?;
-            anyhow::bail!("{:?}: {}", error.kind, error.message);
+            return Err(JobFailed {
+                kind: error.kind,
+                message: error.message,
+            }
+            .into());
         }
 
         log::info!(
@@ -703,7 +753,14 @@ impl BleScheduler {
         }
     }
 
-    async fn note_failure(&self, device_id: &str, reason: &str) {
+    async fn note_failure(&self, device_id: &str, err: &anyhow::Error) {
+        // Never reaching the radio says nothing about the device. Counting it
+        // would let a busy moment set aside a light that is answering fine.
+        if err.downcast_ref::<NoSessionSlot>().is_some() {
+            return;
+        }
+
+        let reason = format!("{err:#}");
         let mut breakers = self.breakers.lock().await;
         let breaker = breakers.entry(device_id.to_string()).or_default();
         breaker.consecutive_failures += 1;
@@ -712,7 +769,10 @@ impl BleScheduler {
         // the caller 30 seconds and says the device is not answering. Waiting
         // for two more of those before setting the device aside spends a minute
         // proving what we already know.
-        let expensive = reason.contains("budget") || reason.contains("Timeout");
+        let expensive = matches!(
+            err.downcast_ref::<JobFailed>().map(|failed| failed.kind),
+            Some(ErrorKind::Timeout)
+        );
         if expensive || breaker.consecutive_failures >= self.config.breaker_threshold {
             // Only announce the transition. A device that stays unreachable
             // reopens the breaker every cooldown, and repeating the warning
@@ -750,6 +810,71 @@ impl BleScheduler {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    fn scheduler() -> BleScheduler {
+        BleScheduler::new(
+            Arc::new(BleBridge::new("gv2mqtt/ble".to_string())),
+            BleSchedulerConfig::default(),
+        )
+    }
+
+    async fn breaker_for(scheduler: &BleScheduler, device_id: &str) -> Option<Breaker> {
+        scheduler.breakers.lock().await.get(device_id).copied()
+    }
+
+    /// Running out of session slots happens on our side of the radio, so it
+    /// says nothing about the device. Counting it would let a busy moment set
+    /// aside a light that is answering perfectly well.
+    #[tokio::test]
+    async fn a_busy_session_slot_does_not_count_against_the_device() {
+        let scheduler = scheduler();
+        let err = anyhow::Error::from(NoSessionSlot { slots: 3 });
+
+        scheduler.note_failure("light", &err).await;
+
+        assert!(breaker_for(&scheduler, "light").await.is_none());
+    }
+
+    /// A job that burned its whole budget already cost the caller 30 seconds.
+    /// Requiring two more of those before setting the device aside spends a
+    /// minute and a half proving what the first one showed.
+    #[tokio::test]
+    async fn a_timeout_opens_the_breaker_at_once() {
+        let scheduler = scheduler();
+        let err = anyhow::Error::from(JobFailed {
+            kind: ErrorKind::Timeout,
+            message: "no answer".to_string(),
+        });
+
+        scheduler.note_failure("light", &err).await;
+
+        let breaker = breaker_for(&scheduler, "light").await.expect("a breaker");
+        assert!(breaker.is_open(Instant::now()));
+    }
+
+    /// Anything that fails quickly is an ordinary failure and has to happen
+    /// `breaker_threshold` times in a row before the device is set aside.
+    #[tokio::test]
+    async fn a_quick_failure_waits_for_the_threshold() {
+        let scheduler = scheduler();
+        let err = anyhow::Error::from(JobFailed {
+            kind: ErrorKind::GattError,
+            message: "status 133".to_string(),
+        });
+
+        for expected in 1..scheduler.config.breaker_threshold {
+            scheduler.note_failure("light", &err).await;
+            let breaker = breaker_for(&scheduler, "light").await.expect("a breaker");
+            assert_eq!(breaker.consecutive_failures, expected);
+            assert!(!breaker.is_open(Instant::now()));
+        }
+
+        scheduler.note_failure("light", &err).await;
+        assert!(breaker_for(&scheduler, "light")
+            .await
+            .expect("a breaker")
+            .is_open(Instant::now()));
+    }
 
     fn frames_hex(pending: &PendingOps) -> Vec<String> {
         pending
