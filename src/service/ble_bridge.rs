@@ -31,6 +31,14 @@ pub struct BleArguments {
     /// You may also set this via the GOVEE_BLE_DISABLE environment variable.
     #[arg(long, global = true)]
     no_ble: bool,
+
+    /// Keep individual devices off Bluetooth while leaving it enabled for
+    /// everything else. Comma separated; each entry matches a device id, SKU or
+    /// name, so `H601B` excludes a whole model and
+    /// `15:25:60:74:F4:2B:2E:A4` a single light.
+    /// You may also set this via the GOVEE_BLE_EXCLUDE environment variable.
+    #[arg(long, global = true)]
+    ble_exclude: Option<String>,
 }
 
 impl BleArguments {
@@ -39,6 +47,14 @@ impl BleArguments {
             Some(prefix) => prefix.clone(),
             None => crate::opt_env_var("GOVEE_BLE_TOPIC_PREFIX")?
                 .unwrap_or_else(|| DEFAULT_TOPIC_PREFIX.to_string()),
+        })
+    }
+
+    /// Raw exclusion spec, from the flag or the environment.
+    pub fn exclude_spec(&self) -> anyhow::Result<Option<String>> {
+        Ok(match &self.ble_exclude {
+            Some(spec) => Some(spec.clone()),
+            None => crate::opt_env_var::<String>("GOVEE_BLE_EXCLUDE")?,
         })
     }
 

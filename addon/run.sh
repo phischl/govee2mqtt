@@ -91,6 +91,10 @@ if bashio::config.has_value no_ble ; then
   export GOVEE_BLE_DISABLE="$(bashio::config no_ble)"
 fi
 
+if bashio::config.has_value ble_exclude ; then
+  export GOVEE_BLE_EXCLUDE="$(bashio::config ble_exclude)"
+fi
+
 if bashio::config.has_value temperature_scale ; then
   export GOVEE_TEMPERATURE_SCALE="$(bashio::config temperature_scale)"
 fi

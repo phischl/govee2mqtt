@@ -45,3 +45,4 @@ schema:
   scan: "str?"
   ble_topic_prefix: "str?"
   no_ble: "bool?"
+  ble_exclude: "str?"

@@ -1,7 +1,7 @@
 use crate::lan_api::Client as LanClient;
 use crate::platform_api::{DeviceType, GoveeApiClient};
 use crate::service::ble_bridge::BleBridge;
-use crate::service::ble_scheduler::{BleScheduler, BleSchedulerConfig};
+use crate::service::ble_scheduler::{BleExclusions, BleScheduler, BleSchedulerConfig};
 use crate::service::device::Device;
 use crate::service::hass::spawn_hass_integration;
 use crate::service::http::run_http_server;
@@ -26,6 +26,35 @@ pub struct ServeCommand {
     http_port: u16,
 }
 
+/// Log what the Bluetooth exclusion list actually matched.
+///
+/// An entry that matches nothing is almost always a typo, and it would
+/// otherwise fail silently: the device would simply keep using Bluetooth and
+/// the user would be left wondering why their exclusion had no effect.
+async fn report_ble_exclusions(state: &StateHandle, exclusions: &BleExclusions) {
+    if exclusions.is_empty() {
+        return;
+    }
+
+    let devices = state.devices().await;
+    for entry in exclusions.entries() {
+        let matched: Vec<String> = devices
+            .iter()
+            .filter(|device| BleExclusions::entry_matches(entry, device))
+            .map(|device| device.to_string())
+            .collect();
+
+        if matched.is_empty() {
+            log::warn!(
+                "BLE exclusion {entry:?} does not match any known device; \
+                 check the spelling against a device id, SKU or name"
+            );
+        } else {
+            log::info!("BLE is disabled for {} by {entry:?}", matched.join(", "));
+        }
+    }
+}
+
 /// Read a Bluetooth-only device's state, if it is due and reachable.
 async fn poll_via_ble(
     state: &StateHandle,
@@ -44,7 +73,7 @@ async fn poll_via_ble(
 
     // An offline executor or an open circuit breaker means a poll would just
     // burn a connection attempt.
-    if !scheduler.is_available_for(&device.id).await {
+    if !scheduler.is_available_for(device).await {
         return Ok(());
     }
 
@@ -418,10 +447,22 @@ impl ServeCommand {
                 "BLE transport will talk to the govee_ble_executor integration on {}",
                 bridge.request_topic()
             );
+
+            let exclusions = args
+                .ble_args
+                .exclude_spec()?
+                .as_deref()
+                .map(BleExclusions::parse)
+                .unwrap_or_default();
+            report_ble_exclusions(&state, &exclusions).await;
+
             state
                 .set_ble_scheduler(Arc::new(BleScheduler::new(
                     bridge,
-                    BleSchedulerConfig::default(),
+                    BleSchedulerConfig {
+                        exclusions,
+                        ..BleSchedulerConfig::default()
+                    },
                 )))
                 .await;
         }

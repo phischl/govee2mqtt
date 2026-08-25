@@ -25,6 +25,7 @@ use crate::service::ble_bridge::{
     BleBridge, ErrorKind, JobOp, JobRequest, JobResult, QuerySpec, WriteSpec,
 };
 use crate::service::device::Device;
+use crate::service::hass::topic_safe_id;
 use crate::service::state::StateHandle;
 use crate::service::transport::DeviceOp;
 use std::collections::HashMap;
@@ -35,6 +36,53 @@ use tokio::sync::{oneshot, Mutex, Semaphore};
 /// Govee's GATT characteristics. Identical across every model seen so far.
 pub const GOVEE_WRITE_CHAR: &str = "00010203-0405-0607-0809-0a0b0c0d2b11";
 pub const GOVEE_NOTIFY_CHAR: &str = "00010203-0405-0607-0809-0a0b0c0d2b10";
+
+/// Devices the user wants kept off Bluetooth even though it is enabled.
+///
+/// Each entry is matched against the same identifiers `resolve_device` accepts —
+/// device id, name, computed name, MQTT topic id — plus the SKU, so a single
+/// entry can exclude one light or a whole model.
+#[derive(Clone, Debug, Default)]
+pub struct BleExclusions {
+    entries: Vec<String>,
+}
+
+impl BleExclusions {
+    /// Parse a comma separated spec. Blank entries are ignored, so a trailing
+    /// comma or a stray space is harmless.
+    pub fn parse(spec: &str) -> Self {
+        Self {
+            entries: spec
+                .split(',')
+                .map(|entry| entry.trim().to_ascii_lowercase())
+                .filter(|entry| !entry.is_empty())
+                .collect(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn entries(&self) -> &[String] {
+        &self.entries
+    }
+
+    /// Whether this entry names the device.
+    pub fn entry_matches(entry: &str, device: &Device) -> bool {
+        entry.eq_ignore_ascii_case(&device.id)
+            || entry.eq_ignore_ascii_case(&device.sku)
+            || entry.eq_ignore_ascii_case(&device.name())
+            || entry.eq_ignore_ascii_case(&device.computed_name())
+            || entry.eq_ignore_ascii_case(&topic_safe_id(device))
+    }
+
+    pub fn excludes(&self, device: &Device) -> bool {
+        self.entries
+            .iter()
+            .any(|entry| Self::entry_matches(entry, device))
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct BleSchedulerConfig {
@@ -57,6 +105,8 @@ pub struct BleSchedulerConfig {
     pub breaker_cooldown: Duration,
     /// How long to wait for a device to answer a status query.
     pub query_timeout: Duration,
+    /// Devices to keep off Bluetooth while it stays enabled for everything else.
+    pub exclusions: BleExclusions,
     /// Read back the attributes we just changed, in the same session.
     ///
     /// Costs no extra connection and catches a frame the device dropped, which
@@ -75,6 +125,7 @@ impl Default for BleSchedulerConfig {
             breaker_threshold: 3,
             breaker_cooldown: Duration::from_secs(300),
             query_timeout: Duration::from_secs(5),
+            exclusions: BleExclusions::default(),
             verify_writes: true,
         }
     }
@@ -251,13 +302,16 @@ impl BleScheduler {
     }
 
     /// Whether BLE is currently worth attempting for a device.
-    pub async fn is_available_for(&self, device_id: &str) -> bool {
+    pub async fn is_available_for(&self, device: &Device) -> bool {
+        if self.config.exclusions.excludes(device) {
+            return false;
+        }
         if !self.bridge.is_online() {
             return false;
         }
         let breakers = self.breakers.lock().await;
         !breakers
-            .get(device_id)
+            .get(&device.id)
             .is_some_and(|breaker| breaker.is_open(Instant::now()))
     }
 
@@ -699,6 +753,53 @@ mod test {
             let raw = data_encoding::BASE64.decode(&frame).unwrap();
             assert_eq!(raw.len(), 20, "{query:?}");
         }
+    }
+
+    fn device(sku: &str, id: &str) -> Device {
+        Device::new(sku, id)
+    }
+
+    #[test]
+    fn an_empty_exclusion_list_excludes_nothing() {
+        let exclusions = BleExclusions::parse("");
+        assert!(exclusions.is_empty());
+        assert!(!exclusions.excludes(&device("H601B", "AA:BB:CC:DD:EE:FF:11:22")));
+    }
+
+    #[test]
+    fn a_device_can_be_excluded_by_id() {
+        let exclusions = BleExclusions::parse("AA:BB:CC:DD:EE:FF:11:22");
+        assert!(exclusions.excludes(&device("H601B", "AA:BB:CC:DD:EE:FF:11:22")));
+        assert!(!exclusions.excludes(&device("H601B", "AA:BB:CC:DD:EE:FF:11:23")));
+    }
+
+    #[test]
+    fn a_whole_model_can_be_excluded_by_sku() {
+        let exclusions = BleExclusions::parse("H601B");
+        assert!(exclusions.excludes(&device("H601B", "AA:BB:CC:DD:EE:FF:11:22")));
+        assert!(!exclusions.excludes(&device("H6127", "AA:BB:CC:DD:EE:FF:11:22")));
+    }
+
+    #[test]
+    fn matching_ignores_case() {
+        let exclusions = BleExclusions::parse("h601b");
+        assert!(exclusions.excludes(&device("H601B", "AA:BB:CC:DD:EE:FF:11:22")));
+    }
+
+    #[test]
+    fn the_computed_name_is_matched_too() {
+        // What the user sees in Home Assistant before renaming.
+        let dev = device("H601B", "AA:BB:CC:DD:EE:FF:11:22");
+        let exclusions = BleExclusions::parse(&dev.computed_name());
+        assert!(exclusions.excludes(&dev));
+    }
+
+    #[test]
+    fn blank_entries_are_ignored() {
+        // A trailing comma or a stray space must not exclude everything.
+        let exclusions = BleExclusions::parse(" H601B , ,");
+        assert_eq!(exclusions.entries(), ["h601b"]);
+        assert!(!exclusions.excludes(&device("H6127", "AA:BB:CC:DD:EE:FF:11:22")));
     }
 
     #[test]

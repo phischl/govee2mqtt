@@ -54,10 +54,10 @@ impl Transport for BleTransport {
             return Ok(Handled::NotSupported);
         };
 
-        // The executor being offline, or this device having failed repeatedly,
-        // is a routing decision rather than an error: say so quietly and let the
-        // next transport have it.
-        if !scheduler.is_available_for(&device.id).await {
+        // Being excluded by configuration, the executor being offline, or this
+        // device having failed repeatedly, is a routing decision rather than an
+        // error: say so quietly and let the next transport have it.
+        if !scheduler.is_available_for(device).await {
             return Ok(Handled::NotSupported);
         }
 

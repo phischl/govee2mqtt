@@ -63,6 +63,7 @@ cannot reach the proxies itself.
 |---|-----------|-------------|-------|
 |`--ble-topic-prefix`|`GOVEE_BLE_TOPIC_PREFIX=gv2mqtt/ble`|`ble_topic_prefix`|MQTT topic prefix shared with the Govee BLE Executor integration. Must match the value configured there. Defaults to `gv2mqtt/ble`.|
 |`--no-ble`|`GOVEE_BLE_DISABLE=true`|`no_ble`|Disable the Bluetooth transport entirely, even when the executor is online.|
+|`--ble-exclude`|`GOVEE_BLE_EXCLUDE=H601B,Desk Lamp`|`ble_exclude`|Keep individual devices off Bluetooth while leaving it enabled for everything else. Comma separated; each entry matches a device id, SKU or name, so `H601B` excludes a whole model and `15:25:60:74:F4:2B:2E:A4` a single light. Excluded devices fall back to LAN or the cloud exactly as they did before.|
 |`--transport-order`|-|-|Override which transports are preferred, as a comma separated list of `ble`, `nightlight`, `lan`, `iot`, `platform`. Acts as a priority prefix: the transports named here are tried first, followed by whatever else the operation allows. It never enables a transport an operation does not support.|
 
 Bluetooth is used only when the executor reports itself online and the device's
