@@ -237,6 +237,13 @@ impl Device {
         for page in pages {
             let first = page.first_segment_index(stride);
             for (n, segment) in page.segments[..stride].iter().enumerate() {
+                // An all-zero group is padding past the device's real segment
+                // count, not a black segment: a segment switched off keeps its
+                // brightness byte. Recording it would invent segments — an
+                // H7093 with two spots sends one page and pads the third slot.
+                if *segment == SegmentColor::default() {
+                    continue;
+                }
                 self.segment_colors.insert(first + n as u32, *segment);
             }
         }
@@ -1012,6 +1019,25 @@ mod test {
             let c = device.segment_color(n).expect("a blue segment");
             assert_eq!((c.r, c.g, c.b), (0x00, 0x00, 0xff), "segment {n}");
         }
+    }
+
+    /// An H7093 with two garden spots sends a single page and pads the rest.
+    /// Recording the padding would invent a third, permanently black segment.
+    #[test]
+    fn padding_does_not_become_a_black_segment() {
+        let mut device = Device::new("H7093", "1F:54:DD:6E:05:C6:49:83");
+        device.set_segment_colors(&[segment_page("aaa501328a00ff320000ff000000000000000084")]);
+
+        assert_eq!(device.segment_colors.len(), 2, "two spots, not three");
+        assert_eq!(
+            device.segment_color(0).map(|c| (c.r, c.g, c.b)),
+            Some((0x8a, 0x00, 0xff))
+        );
+        assert_eq!(
+            device.segment_color(1).map(|c| (c.r, c.g, c.b)),
+            Some((0x00, 0x00, 0xff))
+        );
+        assert_eq!(device.segment_color(2), None);
     }
 
     /// Once a device has shown four groups the stride sticks, so a later batch
