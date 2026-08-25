@@ -238,15 +238,13 @@ impl WorkMode {
         }
         values.sort();
 
-        let min = *values.iter().min()?;
-        let max = *values.iter().max()?;
+        // Sorted above, so the ends are the extremes and "contiguous" is
+        // simply "no gaps between neighbours". Duplicates fail the same test.
+        let min = *values.first()?;
+        let max = *values.last()?;
 
-        let mut expect = min;
-        for item in values {
-            if item != expect {
-                return None;
-            }
-            expect += 1;
+        if values.windows(2).any(|pair| pair[1] != pair[0] + 1) {
+            return None;
         }
 
         Some(min..max + 1)
@@ -350,7 +348,7 @@ ParsedWorkMode {
     #[test]
     fn test_work_mode_parser2() {
         let cap: DeviceCapability =
-            from_json(&include_str!("../../test-data/work-mode-issue-81.json")).unwrap();
+            from_json(include_str!("../../test-data/work-mode-issue-81.json")).unwrap();
 
         let wm = ParsedWorkMode::with_capability(&cap).unwrap();
 
@@ -492,7 +490,7 @@ ParsedWorkMode {
     #[test]
     fn test_work_mode_parser4() {
         let cap: DeviceCapability =
-            from_json(&include_str!("../../test-data/work-mode-issue-93.json")).unwrap();
+            from_json(include_str!("../../test-data/work-mode-issue-93.json")).unwrap();
 
         let wm = ParsedWorkMode::with_capability(&cap).unwrap();
 
@@ -572,7 +570,7 @@ ParsedWorkMode {
     #[test]
     fn test_issue100() {
         let cap: DeviceCapability =
-            from_json(&include_str!("../../test-data/work-mode-issue-100.json")).unwrap();
+            from_json(include_str!("../../test-data/work-mode-issue-100.json")).unwrap();
 
         let mut wm = ParsedWorkMode::with_capability(&cap).unwrap();
         wm.adjust_for_device("H7173");
