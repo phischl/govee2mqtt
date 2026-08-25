@@ -16,10 +16,14 @@
 //!    retried and the router falls through to the cloud instead.
 
 use crate::ble::{
-    Base64HexBytes, Kelvin, SetDeviceBrightness, SetDeviceColorRgb, SetDeviceColorTemperature,
-    SetDevicePower, GENERIC_LIGHT,
+    decode_notification, query_device_brightness, query_device_color, query_device_power,
+    Base64HexBytes, GoveeBlePacket, Kelvin, SetDeviceBrightness, SetDeviceColorRgb,
+    SetDeviceColorTemperature, SetDevicePower, GENERIC_LIGHT,
 };
-use crate::service::ble_bridge::{BleBridge, ErrorKind, JobOp, JobRequest, WriteSpec};
+use crate::lan_api::DeviceColor;
+use crate::service::ble_bridge::{
+    BleBridge, ErrorKind, JobOp, JobRequest, JobResult, QuerySpec, WriteSpec,
+};
 use crate::service::device::Device;
 use crate::service::state::StateHandle;
 use crate::service::transport::DeviceOp;
@@ -30,7 +34,6 @@ use tokio::sync::{oneshot, Mutex, Semaphore};
 
 /// Govee's GATT characteristics. Identical across every model seen so far.
 pub const GOVEE_WRITE_CHAR: &str = "00010203-0405-0607-0809-0a0b0c0d2b11";
-#[allow(dead_code)] // used once BLE status reads land
 pub const GOVEE_NOTIFY_CHAR: &str = "00010203-0405-0607-0809-0a0b0c0d2b10";
 
 #[derive(Clone, Debug)]
@@ -52,6 +55,13 @@ pub struct BleSchedulerConfig {
     pub breaker_threshold: u32,
     /// How long BLE stays disabled for a device once the breaker opens.
     pub breaker_cooldown: Duration,
+    /// How long to wait for a device to answer a status query.
+    pub query_timeout: Duration,
+    /// Read back the attributes we just changed, in the same session.
+    ///
+    /// Costs no extra connection and catches a frame the device dropped, which
+    /// matters because writes are unacknowledged.
+    pub verify_writes: bool,
 }
 
 impl Default for BleSchedulerConfig {
@@ -64,6 +74,8 @@ impl Default for BleSchedulerConfig {
             deadline: Duration::from_secs(20),
             breaker_threshold: 3,
             breaker_cooldown: Duration::from_secs(300),
+            query_timeout: Duration::from_secs(5),
+            verify_writes: true,
         }
     }
 }
@@ -104,6 +116,29 @@ impl PendingOps {
         Ok(())
     }
 
+    /// The attributes worth reading back after this session.
+    ///
+    /// Only what we actually changed: verifying everything would triple the
+    /// length of a session that set one attribute.
+    fn verification_queries(&self) -> Vec<Query> {
+        if self.power == Some(false) {
+            // Nothing else was sent, so nothing else is worth asking about.
+            return vec![Query::Power];
+        }
+
+        let mut queries = vec![];
+        if self.power.is_some() {
+            queries.push(Query::Power);
+        }
+        if self.brightness.is_some() {
+            queries.push(Query::Brightness);
+        }
+        if self.color.is_some() || self.kelvin.is_some() {
+            queries.push(Query::Color);
+        }
+        queries
+    }
+
     /// Render to wire frames, in the order the device expects them.
     fn frames(&self) -> anyhow::Result<Vec<Vec<u8>>> {
         let mut frames = vec![];
@@ -133,6 +168,29 @@ impl PendingOps {
         }
 
         Ok(frames)
+    }
+}
+
+/// A status attribute we can ask a device about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Query {
+    Power,
+    Brightness,
+    Color,
+}
+
+impl Query {
+    const ALL: [Query; 3] = [Query::Power, Query::Brightness, Query::Color];
+
+    fn frame(&self) -> anyhow::Result<Vec<u8>> {
+        let encoded = match self {
+            Self::Power => query_device_power(),
+            Self::Brightness => query_device_brightness(),
+            Self::Color => query_device_color(),
+        };
+        let mut chunks = encoded.base64();
+        anyhow::ensure!(chunks.len() == 1, "a query should be a single frame");
+        Ok(chunks.remove(0).into_bytes())
     }
 }
 
@@ -288,9 +346,51 @@ impl BleScheduler {
         let frames = pending.frames()?;
         anyhow::ensure!(!frames.is_empty(), "nothing to send");
 
-        let mut ops = Vec::with_capacity(frames.len() * 2);
-        for (index, frame) in frames.iter().enumerate() {
-            if index > 0 {
+        let queries = if self.config.verify_writes {
+            pending.verification_queries()
+        } else {
+            vec![]
+        };
+
+        self.exchange(state, device_id, sku, address, &frames, &queries, "user")
+            .await
+    }
+
+    /// Read a device's current state without changing anything.
+    pub async fn poll(
+        &self,
+        state: &StateHandle,
+        device_id: &str,
+        sku: &str,
+        address: &str,
+    ) -> anyhow::Result<()> {
+        let result = self
+            .exchange(state, device_id, sku, address, &[], &Query::ALL, "poll")
+            .await;
+
+        match &result {
+            Ok(()) => self.note_success(device_id).await,
+            Err(err) => self.note_failure(device_id, &err.to_string()).await,
+        }
+        result
+    }
+
+    /// Build one session, hand it to the executor, and apply whatever came back.
+    #[allow(clippy::too_many_arguments)]
+    async fn exchange(
+        &self,
+        state: &StateHandle,
+        device_id: &str,
+        sku: &str,
+        address: &str,
+        frames: &[Vec<u8>],
+        queries: &[Query],
+        priority: &'static str,
+    ) -> anyhow::Result<()> {
+        let mut ops = Vec::with_capacity((frames.len() + queries.len()) * 2);
+
+        for frame in frames {
+            if !ops.is_empty() {
                 ops.push(JobOp::Delay(
                     self.config.inter_frame_delay.as_millis() as u64
                 ));
@@ -302,44 +402,130 @@ impl BleScheduler {
             }));
         }
 
+        for query in queries {
+            if !ops.is_empty() {
+                ops.push(JobOp::Delay(
+                    self.config.inter_frame_delay.as_millis() as u64
+                ));
+            }
+            ops.push(JobOp::Query(QuerySpec {
+                write_char: GOVEE_WRITE_CHAR,
+                notify_char: GOVEE_NOTIFY_CHAR,
+                data: String::from_utf8(query.frame()?)?,
+                timeout_ms: self.config.query_timeout.as_millis() as u64,
+            }));
+        }
+        anyhow::ensure!(!ops.is_empty(), "nothing to do");
+
         let job = JobRequest {
             id: uuid::Uuid::new_v4().to_string(),
             address: address.to_uppercase(),
-            priority: "user",
+            priority,
             keep_open_ms: self.config.keep_open.as_millis() as u64,
             deadline_ms: self.config.deadline.as_millis() as u64,
             ops,
         };
         let job_id = job.id.clone();
 
-        // Allow for the executor's own queue on top of its deadline, so that our
-        // timeout is a genuine "the executor is gone" signal rather than a race
-        // with a job it is still working on.
-        let timeout = self.config.deadline + Duration::from_secs(15);
+        // Allow for the executor's own queue and for however long the queries
+        // may take, on top of its deadline, so that our timeout is a genuine
+        // "the executor is gone" signal rather than a race with a live job.
+        let timeout = self.config.deadline
+            + self.config.query_timeout * (queries.len() as u32 + 1)
+            + Duration::from_secs(10);
 
         // Held for the whole exchange: releasing on publish would let the next
         // session start while this one still owns a connection slot.
         let _permit = self.gate.acquire().await?;
 
         log::debug!(
-            "BLE job {job_id}: {} frame(s) to {sku} {device_id} at {address}",
-            frames.len()
+            "BLE job {job_id}: {} frame(s), {} query/queries to {sku} {device_id} at {address}",
+            frames.len(),
+            queries.len()
         );
 
         let response = self.bridge.submit(state, job, timeout).await?;
-        if response.ok {
-            log::info!(
-                "Using BLE to update {sku} {device_id} ({} frame(s), {}ms)",
-                frames.len(),
-                response.duration_ms
-            );
-            return Ok(());
+        if !response.ok {
+            let error = response
+                .error
+                .ok_or_else(|| anyhow::anyhow!("BLE job {job_id} failed without saying why"))?;
+            anyhow::bail!("{:?}: {}", error.kind, error.message);
         }
 
-        let error = response
-            .error
-            .ok_or_else(|| anyhow::anyhow!("BLE job {job_id} failed without saying why"))?;
-        anyhow::bail!("{:?}: {}", error.kind, error.message)
+        log::info!(
+            "Using BLE to reach {sku} {device_id} ({} frame(s), {} query/queries, {}ms)",
+            frames.len(),
+            queries.len(),
+            response.duration_ms
+        );
+
+        self.apply_notifications(state, sku, device_id, &response.results)
+            .await;
+        Ok(())
+    }
+
+    /// Fold status notifications into the device's state.
+    ///
+    /// Notifications identify themselves, so they are matched by content rather
+    /// than by position: a device that answers out of order, or answers only
+    /// some queries, still tells us something useful.
+    async fn apply_notifications(
+        &self,
+        state: &StateHandle,
+        sku: &str,
+        device_id: &str,
+        results: &[JobResult],
+    ) {
+        let mut changed = false;
+
+        for result in results.iter().filter(|result| result.kind == "notify") {
+            let Some(encoded) = &result.data else {
+                continue;
+            };
+            let Ok(bytes) = data_encoding::BASE64.decode(encoded.as_bytes()) else {
+                log::warn!("BLE notification from {device_id} was not valid base64");
+                continue;
+            };
+
+            let packet = decode_notification(GENERIC_LIGHT, &bytes);
+            let mut device = state.device_mut(sku, device_id).await;
+            match packet {
+                GoveeBlePacket::NotifyDevicePower(power) => {
+                    changed |= device.update_ble_device_status(|status| status.on = power.on);
+                }
+                GoveeBlePacket::NotifyDeviceBrightness(brightness) => {
+                    changed |= device.update_ble_device_status(|status| {
+                        status.brightness = brightness.percent;
+                    });
+                }
+                GoveeBlePacket::NotifyDeviceColor(color) => {
+                    changed |= device.update_ble_device_status(|status| {
+                        status.color = DeviceColor {
+                            r: color.r,
+                            g: color.g,
+                            b: color.b,
+                        };
+                        // Zero is the device telling us it is showing an RGB
+                        // colour rather than white.
+                        status.color_temperature_kelvin =
+                            color.kelvin.get().map(u32::from).unwrap_or(0);
+                    });
+                }
+                other => {
+                    log::debug!("unhandled BLE notification from {device_id}: {other:?}");
+                }
+            }
+        }
+
+        if !changed {
+            return;
+        }
+
+        // The guard above must be out of scope before this: notifying Home
+        // Assistant re-reads the device and would deadlock against it.
+        if let Err(err) = state.notify_of_state_change(device_id).await {
+            log::error!("failed to publish BLE state for {device_id}: {err:#}");
+        }
     }
 
     async fn note_success(&self, device_id: &str) {
@@ -475,6 +661,44 @@ mod test {
         assert!(pending
             .merge(&DeviceOp::SetScene("Sunrise".to_string()))
             .is_err());
+    }
+
+    #[test]
+    fn only_the_attributes_we_changed_are_read_back() {
+        let mut pending = PendingOps::default();
+        pending.merge(&DeviceOp::SetBrightness(50)).unwrap();
+
+        assert_eq!(pending.verification_queries(), vec![Query::Brightness]);
+    }
+
+    #[test]
+    fn colour_and_colour_temperature_share_one_query() {
+        let mut pending = PendingOps::default();
+        pending.merge(&DeviceOp::LightPowerOn(true)).unwrap();
+        pending.merge(&DeviceOp::SetColorTemperature(3000)).unwrap();
+
+        assert_eq!(
+            pending.verification_queries(),
+            vec![Query::Power, Query::Color]
+        );
+    }
+
+    #[test]
+    fn switching_off_only_reads_back_the_power_state() {
+        let mut pending = PendingOps::default();
+        pending.merge(&DeviceOp::SetBrightness(80)).unwrap();
+        pending.merge(&DeviceOp::PowerOn(false)).unwrap();
+
+        assert_eq!(pending.verification_queries(), vec![Query::Power]);
+    }
+
+    #[test]
+    fn queries_are_single_frames() {
+        for query in Query::ALL {
+            let frame = query.frame().unwrap();
+            let raw = data_encoding::BASE64.decode(&frame).unwrap();
+            assert_eq!(raw.len(), 20, "{query:?}");
+        }
     }
 
     #[test]

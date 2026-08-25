@@ -1,5 +1,5 @@
 use crate::lan_api::Client as LanClient;
-use crate::platform_api::GoveeApiClient;
+use crate::platform_api::{DeviceType, GoveeApiClient};
 use crate::service::ble_bridge::BleBridge;
 use crate::service::ble_scheduler::{BleScheduler, BleSchedulerConfig};
 use crate::service::device::Device;
@@ -26,12 +26,59 @@ pub struct ServeCommand {
     http_port: u16,
 }
 
+/// Read a Bluetooth-only device's state, if it is due and reachable.
+async fn poll_via_ble(
+    state: &StateHandle,
+    device: &Device,
+    now: chrono::DateTime<Utc>,
+) -> anyhow::Result<()> {
+    let (Some(scheduler), Some(address)) = (state.get_ble_scheduler().await, device.ble_address())
+    else {
+        return Ok(());
+    };
+
+    // Only lights have a command set we understand.
+    if !matches!(device.device_type(), DeviceType::Light) {
+        return Ok(());
+    }
+
+    // An offline executor or an open circuit breaker means a poll would just
+    // burn a connection attempt.
+    if !scheduler.is_available_for(&device.id).await {
+        return Ok(());
+    }
+
+    let poll_interval = device.preferred_poll_interval();
+    let due = match &device.last_polled {
+        None => true,
+        Some(last) => now - last > poll_interval,
+    };
+    if !due {
+        return Ok(());
+    }
+
+    // Recorded before the attempt, so that an unreachable device is retried on
+    // the usual interval rather than on every tick of the poll loop.
+    state
+        .device_mut(&device.sku, &device.id)
+        .await
+        .set_last_polled();
+
+    scheduler
+        .poll(state, &device.id, &device.sku, &address)
+        .await
+        .with_context(|| format!("polling {device} over BLE"))
+}
+
 async fn poll_single_device(state: &StateHandle, device: &Device) -> anyhow::Result<()> {
     let now = Utc::now();
 
     if device.is_ble_only_device() == Some(true) {
-        // We can't poll this device, we have no ble support
-        return Ok(());
+        // Bluetooth-only devices have no other source to poll, so this is the
+        // only way their state ever reaches Home Assistant. Devices that also
+        // have a cloud or LAN presence keep using those; their Bluetooth writes
+        // are verified within the session that issued them.
+        return poll_via_ble(state, device, now).await;
     }
 
     // Collect the device status via the LAN API, if possible.

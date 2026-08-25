@@ -70,6 +70,11 @@ Bluetooth address is known. Addresses come from your Govee account metadata, so
 no manual configuration is needed. If Bluetooth fails repeatedly for a device,
 it is set aside for five minutes and the usual LAN or cloud path is used instead.
 
+Bluetooth-only lights, which previous versions hid because there was no way to
+reach them, now appear in Home Assistant as long as their address is known.
+Their state is read back after each command and refreshed periodically on the
+usual poll interval.
+
 ## MQTT Configuration
 
 In order to make your devices appear in Home Assistant, you will need to have configured Home Assistant with an MQTT broker.

@@ -637,6 +637,14 @@ fn notification_body(data: &[u8], prefix: &[u8]) -> anyhow::Result<Vec<u8>> {
     Ok(data[prefix.len()..19].to_vec())
 }
 
+/// Decode a frame a device sent us.
+///
+/// Unlike `Base64HexBytes::with_bytes`, this does not re-pad or re-checksum:
+/// the bytes are exactly what arrived over the air.
+pub fn decode_notification(sku: &str, data: &[u8]) -> GoveeBlePacket {
+    MGR.decode_for_sku(sku, data)
+}
+
 /// Ask the device to report its power state.
 // Consumed by the BLE transport in a later milestone.
 #[allow(dead_code)]

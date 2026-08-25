@@ -36,6 +36,12 @@ pub struct Device {
     pub iot_device_status: Option<LanDeviceStatus>,
     pub last_iot_device_status_update: Option<DateTime<Utc>>,
 
+    /// Status assembled from Bluetooth notifications. Unlike the other sources
+    /// this arrives one attribute at a time, so it is merged rather than
+    /// replaced.
+    pub ble_device_status: Option<LanDeviceStatus>,
+    pub last_ble_device_status_update: Option<DateTime<Utc>>,
+
     pub nightlight_state: Option<NotifyHumidifierNightlightParams>,
     pub target_humidity_percent: Option<u8>,
     pub humidifier_work_mode: Option<u8>,
@@ -197,6 +203,22 @@ impl Device {
     }
 
     /// Update the LAN device status information
+    /// Apply what a Bluetooth notification told us.
+    ///
+    /// Each notification covers a single attribute, so this merges into the
+    /// running picture instead of replacing it. `apply` is handed the current
+    /// status to modify.
+    pub fn update_ble_device_status<F: FnOnce(&mut LanDeviceStatus)>(&mut self, apply: F) -> bool {
+        let mut status = self.ble_device_status.clone().unwrap_or_default();
+        (apply)(&mut status);
+
+        let changed = self.ble_device_status.as_ref() != Some(&status);
+        self.ble_device_status.replace(status);
+        self.last_ble_device_status_update.replace(Utc::now());
+        self.clear_scene_if_color_changed();
+        changed
+    }
+
     pub fn set_lan_device_status(&mut self, status: LanDeviceStatus) -> bool {
         let changed = self
             .lan_device_status
@@ -237,6 +259,25 @@ impl Device {
         });
         self.last_undoc_device_info_update.replace(Utc::now());
         self.clear_scene_if_color_changed();
+    }
+
+    pub fn compute_ble_device_state(&self) -> Option<DeviceState> {
+        let updated = self.last_ble_device_status_update?;
+        let status = self.ble_device_status.as_ref()?;
+
+        Some(DeviceState {
+            on: status.on,
+            light_on: Some(status.on),
+            // Bluetooth says nothing about cloud connectivity, and claiming
+            // otherwise would make a locally reachable device look offline.
+            online: None,
+            brightness: status.brightness,
+            color: status.color,
+            kelvin: status.color_temperature_kelvin,
+            scene: self.active_scene.as_ref().map(|info| info.name.to_string()),
+            source: "BLE",
+            updated,
+        })
     }
 
     pub fn compute_iot_device_state(&self) -> Option<DeviceState> {
@@ -358,6 +399,9 @@ impl Device {
             candidates.push(state);
         }
         if let Some(state) = self.compute_iot_device_state() {
+            candidates.push(state);
+        }
+        if let Some(state) = self.compute_ble_device_state() {
             candidates.push(state);
         }
 
@@ -626,7 +670,16 @@ impl Device {
     }
 
     pub fn is_controllable(&self) -> bool {
-        !matches!(self.is_ble_only_device(), Some(true))
+        if !matches!(self.is_ble_only_device(), Some(true)) {
+            return true;
+        }
+
+        // Bluetooth-only lights used to be hidden from Home Assistant because
+        // there was no way to reach them. Now there is, provided we know the
+        // address. Deliberately not conditioned on the executor being online:
+        // entities appearing and disappearing with it would be worse than an
+        // entity that is briefly unavailable.
+        matches!(self.device_type(), DeviceType::Light) && self.ble_address().is_some()
     }
 }
 
@@ -644,5 +697,45 @@ mod test {
 
         let device = Device::new("H6127", "ce");
         assert_eq!(device.name(), "H6127_CE");
+    }
+    #[test]
+    fn ble_address_is_derived_from_the_device_id() {
+        // Verified against test-data/undoc-device-list.json, where the account
+        // metadata reports address=CF:00:00:00:00:25 for this device id.
+        let device = Device::new("H6072", "47:13:CF:00:00:00:00:25");
+        assert_eq!(device.ble_address().as_deref(), Some("CF:00:00:00:00:25"));
+    }
+
+    #[test]
+    fn ble_address_is_upper_cased() {
+        let device = Device::new("H6072", "47:13:cf:00:00:00:00:25");
+        assert_eq!(device.ble_address().as_deref(), Some("CF:00:00:00:00:25"));
+    }
+
+    #[test]
+    fn an_id_that_is_not_a_mac_yields_no_ble_address() {
+        // Some devices report a bare hex id with no separators.
+        assert_eq!(Device::new("H6127", "aabbccddeeff4222").ble_address(), None);
+        assert_eq!(Device::new("H6127", "not-a-mac").ble_address(), None);
+    }
+
+    #[test]
+    fn ble_status_updates_merge_rather_than_replace() {
+        // Each notification covers one attribute, so brightness must survive a
+        // later power notification.
+        let mut device = Device::new("H6127", "AA:BB:CC:DD:EE:FF:11:22");
+        assert!(device.update_ble_device_status(|status| status.brightness = 42));
+        assert!(device.update_ble_device_status(|status| status.on = true));
+
+        let status = device.ble_device_status.as_ref().unwrap();
+        assert_eq!(status.brightness, 42);
+        assert!(status.on);
+    }
+
+    #[test]
+    fn an_unchanged_ble_status_reports_no_change() {
+        let mut device = Device::new("H6127", "AA:BB:CC:DD:EE:FF:11:22");
+        assert!(device.update_ble_device_status(|status| status.brightness = 42));
+        assert!(!device.update_ble_device_status(|status| status.brightness = 42));
     }
 }
