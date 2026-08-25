@@ -53,7 +53,7 @@ when we get to that point.
 ![image](https://github.com/wez/govee-lan-hass/assets/117777/c425615b-d7be-4ff2-a0d9-c8b7cfb8b63e)
 
 4. Click on "Repositories"
-5. Enter `https://github.com/wez/govee2mqtt` and click "Add"
+5. Enter `https://github.com/phischl/govee2mqtt` and click "Add"
 6. You should see:
 
 ![image](https://github.com/wez/govee-lan-hass/assets/117777/a2603e2d-dec1-4711-8d94-c957bf4a7a01)
@@ -75,6 +75,23 @@ when we get to that point.
 14. Click "Save" (bottom right)
 15. Click on the "Info" tab (top of screen)
 16. Now you can click "Start" to launch it
+
+### If you want Bluetooth
+
+The add-on cannot talk to your Bluetooth proxies itself, so Bluetooth control needs a
+companion integration. Skip this if you only use LAN and the cloud.
+
+1. Install [HACS](https://hacs.xyz/) if you do not have it already
+2. In HACS, open the ⋮ menu and choose "Custom repositories"
+3. Enter `https://github.com/phischl/govee2mqtt`, pick the category **Integration**, and add it
+4. Install *Govee BLE Executor* and restart Home Assistant
+5. Go to Settings → Devices & Services → Add Integration and add *Govee BLE Executor*
+
+It needs no configuration beyond the MQTT topic prefix, which matches the add-on's default.
+Without it the Bluetooth transport quietly declines every command and everything falls back to
+LAN or the cloud, so nothing breaks — you just get no Bluetooth.
+
+See [BLUETOOTH.md](BLUETOOTH.md) for how the two halves talk to each other.
 
 ### Verify
 

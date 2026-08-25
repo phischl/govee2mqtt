@@ -1,5 +1,10 @@
 # Govee to MQTT bridge for Home Assistant
 
+[![Container Build](https://github.com/phischl/govee2mqtt/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/phischl/govee2mqtt/actions/workflows/build.yml)
+[![Security](https://github.com/phischl/govee2mqtt/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/phischl/govee2mqtt/actions/workflows/security.yml)
+[![Home Assistant Integration](https://github.com/phischl/govee2mqtt/actions/workflows/component.yml/badge.svg?branch=main)](https://github.com/phischl/govee2mqtt/actions/workflows/component.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
+
 This repo provides a `govee` executable whose primary purpose is to act
 as a bridge between [Govee](https://govee.com) devices and Home Assistant,
 via the [Home Assistant MQTT Integration](https://www.home-assistant.io/integrations/mqtt/).
@@ -53,7 +58,7 @@ second add-on, so it installs through HACS and not through the Add-on Store.
 |Music Modes|API Key|Find in the list of Effects for the light in Home Assistant|
 |Tap-to-Run / One Click Scene|IoT|Find in the overall list of Scenes in Home Assistant, as well as under the `Govee to MQTT` device|
 |Live Device Status Updates|LAN and/or IoT|Devices typically report most changes within a couple of seconds.|
-|Segment Color|API Key|Find the `Segment 00X` light entities associated with your main light device in Home Assistant|
+|Segment Color|API Key|Find the `Segment 00X` light entities associated with your main light device in Home Assistant. Setting a colour needs the API Key; *reading back* which segment is which colour needs `IoT`, since the Platform API reports segment state as empty|
 
 * `API Key` means that you have [applied for a key from Govee](https://developer.govee.com/reference/apply-you-govee-api-key)
   and have configured it for use in govee2mqtt
@@ -74,21 +79,26 @@ second add-on, so it installs through HACS and not through the Add-on Store.
 * [Is my device supported?](docs/SKUS.md)
 * [Check out the FAQ](docs/FAQ.md)
 
-## Want to show your support or gratitude?
+## Supporting the original author
 
-It takes significant effort to build, maintain and support users of software
-like this. If you can spare something to say thanks, it is appreciated!
+Almost everything here was written by Wez Furlong, and this fork adds one transport on
+top of it. If you find it useful, the thanks belong upstream:
 
-* [Sponsor me on Github](https://github.com/sponsors/wez)
-* [Sponsor me on Patreon](https://patreon.com/WezFurlong)
-* [Sponsor me on Ko-Fi](https://ko-fi.com/wezfurlong)
-* [Sponsor me via liberapay](https://liberapay.com/wez)
+* [Sponsor Wez on Github](https://github.com/sponsors/wez)
+* [Sponsor Wez on Patreon](https://patreon.com/WezFurlong)
+* [Sponsor Wez on Ko-Fi](https://ko-fi.com/wezfurlong)
+* [Sponsor Wez via liberapay](https://liberapay.com/wez)
+
+This fork asks for nothing.
 
 ## Credits
 
-This work is based on my earlier work with [Govee LAN
-Control](https://github.com/wez/govee-lan-hass/).
+The original project is [wez/govee2mqtt](https://github.com/wez/govee2mqtt), which grew out
+of Wez Furlong's earlier [Govee LAN Control](https://github.com/wez/govee-lan-hass/).
 
 The AWS IoT support was made possible by the work of @bwp91 in
 [homebridge-govee](https://github.com/bwp91/homebridge-govee/).
+
+The Bluetooth frame formats were reconstructed from captures against real devices, building
+on the reverse engineering published by AlgoClaw and egold555.
 
