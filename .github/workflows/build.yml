@@ -169,7 +169,15 @@ jobs:
           registry: https://ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # The published version has to be the tag being built. Left unset, the
+      # script derives it from the checked-out commit instead -- which on a
+      # release is the "Tag ..." commit, not the code commit the tag is named
+      # after. That publishes the add-on under a version addon/config.yaml
+      # does not ask for, so Home Assistant looks for an image that does not
+      # exist.
       - name: Apply tag to version
+        env:
+          TAG_NAME: ${{ github.ref_name }}
         run: ./scripts/apply-tag.sh
       # --cosign is deliberately absent. It makes the builder verify the Home
       # Assistant base images, and the cosign bundled with this builder release
