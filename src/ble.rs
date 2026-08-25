@@ -332,6 +332,47 @@ impl PacketManager {
             },
         ));
 
+        all_codecs.push(PacketCodec::new(
+            &[GENERIC_LIGHT],
+            |value: &NotifySegmentColors| {
+                let mut bytes = vec![0xaa, 0xa5, value.page];
+                for segment in &value.segments {
+                    bytes.extend_from_slice(&[segment.brightness, segment.r, segment.g, segment.b]);
+                }
+                Ok(finish(bytes))
+            },
+            |data| {
+                // One page byte, then four bytes per segment.
+                const PAGE_LEN: usize = 1 + SEGMENTS_PER_PAGE * 4;
+
+                let body = notification_body(data, &[0xaa, 0xa5])?;
+                anyhow::ensure!(
+                    body.len() >= PAGE_LEN,
+                    "segment notification is too short: {} bytes",
+                    body.len()
+                );
+
+                let page = body[0];
+                anyhow::ensure!(page > 0, "segment pages are numbered from 1, got {page}");
+
+                let mut segments = [SegmentColor::default(); SEGMENTS_PER_PAGE];
+                for (n, segment) in segments.iter_mut().enumerate() {
+                    let at = 1 + n * 4;
+                    *segment = SegmentColor {
+                        brightness: body[at],
+                        r: body[at + 1],
+                        g: body[at + 2],
+                        b: body[at + 3],
+                    };
+                }
+
+                Ok(GoveeBlePacket::NotifySegmentColors(NotifySegmentColors {
+                    page,
+                    segments,
+                }))
+            },
+        ));
+
         Self {
             codec_by_sku: Mutex::new(HashMap::new()),
             all_codecs: all_codecs.into_iter().map(Arc::new).collect(),
@@ -619,6 +660,42 @@ pub struct NotifyDeviceColor {
     pub kelvin: OptionalKelvin,
 }
 
+/// Number of segments carried by one `aa a5` page.
+pub const SEGMENTS_PER_PAGE: usize = 3;
+
+/// One segment's colour, as it appears inside an `aa a5` page.
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub struct SegmentColor {
+    /// Reported per segment, but not on the device's brightness scale: a lamp
+    /// reporting 60% overall reports 0x5f here. Kept as the raw byte until we
+    /// know what it measures.
+    pub brightness: u8,
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+}
+
+/// Per-segment colours, reported in pages of three.
+///
+/// This is the only source of segment state we have: the Platform API answers
+/// `segmentedColorRgb` with an empty string, while the device volunteers these
+/// frames inside its reply to an AWS IoT `status` request. A page always
+/// carries three slots even when the device has fewer segments left to
+/// describe, so the trailing slots of the last page can be filler.
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub struct NotifySegmentColors {
+    /// 1-based: page 1 describes segments 0..=2, page 2 segments 3..=5.
+    pub page: u8,
+    pub segments: [SegmentColor; SEGMENTS_PER_PAGE],
+}
+
+impl NotifySegmentColors {
+    /// Index of the first segment this page describes.
+    pub fn first_segment_index(&self) -> u32 {
+        u32::from(self.page.saturating_sub(1)) * SEGMENTS_PER_PAGE as u32
+    }
+}
+
 /// Validate a notification frame and return the bytes following `prefix`,
 /// excluding the trailing checksum.
 fn notification_body(data: &[u8], prefix: &[u8]) -> anyhow::Result<Vec<u8>> {
@@ -681,6 +758,7 @@ pub enum GoveeBlePacket {
     NotifyDevicePower(NotifyDevicePower),
     NotifyDeviceBrightness(NotifyDeviceBrightness),
     NotifyDeviceColor(NotifyDeviceColor),
+    NotifySegmentColors(NotifySegmentColors),
     SetHumidifierNightlight(SetHumidifierNightlightParams),
     NotifyHumidifierMode(NotifyHumidifierMode),
     SetHumidifierMode(SetHumidifierMode),
@@ -1043,5 +1121,105 @@ a3 ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5c
     fn optional_kelvin_distinguishes_rgb_from_white() {
         assert_eq!(OptionalKelvin(0).get(), None);
         assert_eq!(OptionalKelvin(2700).get(), Some(2700));
+    }
+
+    fn segment(brightness: u8, r: u8, g: u8, b: u8) -> SegmentColor {
+        SegmentColor {
+            brightness,
+            r,
+            g,
+            b,
+        }
+    }
+
+    /// Captured from an H6072 whose eight segments were, from the bottom,
+    /// red / green / yellow / green / magenta / green / cyan / green. The
+    /// ninth slot of the last page does not exist on this lamp and carries
+    /// filler.
+    #[test]
+    fn decodes_segment_colours_captured_from_a_device() {
+        let cases = [
+            (
+                "aaa5015fff00005f00ff005fffff000000000051",
+                NotifySegmentColors {
+                    page: 1,
+                    segments: [
+                        segment(0x5f, 0xff, 0x00, 0x00),
+                        segment(0x5f, 0x00, 0xff, 0x00),
+                        segment(0x5f, 0xff, 0xff, 0x00),
+                    ],
+                },
+            ),
+            (
+                "aaa5025f00ff005fff00ff5f00ff000000000052",
+                NotifySegmentColors {
+                    page: 2,
+                    segments: [
+                        segment(0x5f, 0x00, 0xff, 0x00),
+                        segment(0x5f, 0xff, 0x00, 0xff),
+                        segment(0x5f, 0x00, 0xff, 0x00),
+                    ],
+                },
+            ),
+            (
+                "aaa5035f00ffff5f00ff002a5f5f5f0000000086",
+                NotifySegmentColors {
+                    page: 3,
+                    segments: [
+                        segment(0x5f, 0x00, 0xff, 0xff),
+                        segment(0x5f, 0x00, 0xff, 0x00),
+                        segment(0x2a, 0x5f, 0x5f, 0x5f),
+                    ],
+                },
+            ),
+        ];
+
+        for (frame, expected) in cases {
+            let bytes: Vec<u8> = (0..frame.len())
+                .step_by(2)
+                .map(|n| u8::from_str_radix(&frame[n..n + 2], 16).unwrap())
+                .collect();
+
+            assert_eq!(
+                MGR.decode_for_sku(GENERIC_LIGHT, &bytes),
+                GoveeBlePacket::NotifySegmentColors(expected),
+                "decoding {frame}"
+            );
+
+            // And the encoder reproduces the device's own bytes exactly.
+            assert_eq!(
+                hex(&Base64HexBytes::encode_for_sku(GENERIC_LIGHT, &expected).unwrap()),
+                frame
+            );
+        }
+    }
+
+    /// Page numbers are 1-based; every page maps onto three consecutive
+    /// segments, which is what lines the frames up with the `Segment {n:03}`
+    /// entities.
+    #[test]
+    fn segment_pages_map_onto_segment_indices() {
+        let page_of = |page| NotifySegmentColors {
+            page,
+            ..Default::default()
+        };
+
+        assert_eq!(page_of(1).first_segment_index(), 0);
+        assert_eq!(page_of(2).first_segment_index(), 3);
+        assert_eq!(page_of(3).first_segment_index(), 6);
+    }
+
+    /// Page 0 would collide with segment 0 of page 1, so it is rejected rather
+    /// than quietly treated as the first page.
+    #[test]
+    fn segment_page_zero_is_rejected() {
+        let mut frame = vec![0xaa, 0xa5, 0x00];
+        frame.resize(19, 0);
+        frame.push(calculate_checksum(&frame));
+
+        assert!(matches!(
+            MGR.decode_for_sku(GENERIC_LIGHT, &frame),
+            GoveeBlePacket::Generic(_)
+        ));
     }
 }

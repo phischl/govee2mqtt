@@ -1,4 +1,4 @@
-use crate::ble::NotifyHumidifierNightlightParams;
+use crate::ble::{NotifyHumidifierNightlightParams, NotifySegmentColors, SegmentColor};
 use crate::commands::serve::POLL_INTERVAL;
 use crate::lan_api::{DeviceColor, DeviceStatus as LanDeviceStatus, LanDevice};
 use crate::platform_api::{
@@ -41,6 +41,12 @@ pub struct Device {
     /// replaced.
     pub ble_device_status: Option<LanDeviceStatus>,
     pub last_ble_device_status_update: Option<DateTime<Utc>>,
+
+    /// Per-segment colours, keyed by the Govee segment index. Only the
+    /// undocumented AWS IoT channel reports these, and only in reply to a
+    /// status request, so they refresh on the poll interval rather than live.
+    pub segment_colors: HashMap<u32, SegmentColor>,
+    pub last_segment_colors_update: Option<DateTime<Utc>>,
 
     pub nightlight_state: Option<NotifyHumidifierNightlightParams>,
     pub target_humidity_percent: Option<u8>,
@@ -191,6 +197,28 @@ impl Device {
 
     pub fn set_last_polled(&mut self) {
         self.last_polled.replace(Utc::now());
+    }
+
+    /// Merge one page of segment colours into the picture.
+    ///
+    /// Pages are merged rather than replacing the map wholesale: they arrive as
+    /// separate frames, and a device that reports only some of them should
+    /// still update the segments it did report.
+    pub fn set_segment_colors(&mut self, page: &NotifySegmentColors) {
+        let first = page.first_segment_index();
+        for (n, segment) in page.segments.iter().enumerate() {
+            self.segment_colors.insert(first + n as u32, *segment);
+        }
+        self.last_segment_colors_update.replace(Utc::now());
+    }
+
+    /// Colour last reported for one segment.
+    ///
+    /// A page always carries three slots, so the map can hold entries past the
+    /// device's real segment count. Callers only ask about segments that have
+    /// an entity, which keeps that filler out of Home Assistant.
+    pub fn segment_color(&self, segment: u32) -> Option<SegmentColor> {
+        self.segment_colors.get(&segment).copied()
     }
 
     pub fn set_nightlight_state(&mut self, params: NotifyHumidifierNightlightParams) {

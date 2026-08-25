@@ -56,6 +56,7 @@ impl LightConfig {
 pub struct DeviceLight {
     light: LightConfig,
     device_id: String,
+    segment: Option<u32>,
     state: StateHandle,
 }
 
@@ -66,15 +67,45 @@ impl EntityInstance for DeviceLight {
     }
 
     async fn notify_state(&self, client: &HassClient) -> anyhow::Result<()> {
-        if self.light.optimistic {
-            return Ok(());
-        }
-
         let device = self
             .state
             .device_by_id(&self.device_id)
             .await
             .expect("device to exist");
+
+        if let Some(segment) = self.segment {
+            // Segment entities stay optimistic so that a device which never
+            // reports its segments still shows what it was told to do. When
+            // the device does report, that report corrects the guess.
+            let Some(color) = device.segment_color(segment) else {
+                return Ok(());
+            };
+
+            // A segment cannot be lit while the device is off, and the frames
+            // keep reporting the colours the segments will resume with.
+            let powered = device
+                .device_state()
+                .map(|state| state.light_on.unwrap_or(state.on))
+                .unwrap_or(false);
+
+            let segment_state = if powered {
+                json!({
+                    "state": "ON",
+                    "color_mode": "rgb",
+                    "color": {"r": color.r, "g": color.g, "b": color.b},
+                })
+            } else {
+                json!({"state": "OFF"})
+            };
+
+            return client
+                .publish_obj(&self.light.state_topic, &segment_state)
+                .await;
+        }
+
+        if self.light.optimistic {
+            return Ok(());
+        }
 
         match device.device_state() {
             Some(device_state) => {
@@ -226,6 +257,7 @@ impl DeviceLight {
                 icon,
             },
             device_id: device.id.to_string(),
+            segment,
             state: state.clone(),
         })
     }

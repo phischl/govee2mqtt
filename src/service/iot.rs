@@ -1,4 +1,6 @@
-use crate::ble::{Base64HexBytes, GoveeBlePacket, HumidifierAutoMode, NotifyHumidifierMode};
+use crate::ble::{
+    Base64HexBytes, GoveeBlePacket, HumidifierAutoMode, NotifyHumidifierMode, GENERIC_LIGHT,
+};
 use crate::lan_api::{DeviceColor, DeviceStatus};
 use crate::platform_api::from_json;
 use crate::service::state::StateHandle;
@@ -416,7 +418,17 @@ async fn run_iot_subscriber(
 
                                 if let Some(op) = &packet.op {
                                     for cmd in &op.command {
-                                        let decoded = cmd.decode_for_sku(sku);
+                                        // A device's status carries generic light
+                                        // frames that its own SKU has no codec
+                                        // registered for, so anything the SKU
+                                        // cannot place gets a second chance under
+                                        // the generic light key before we give up.
+                                        let decoded = match cmd.decode_for_sku(sku) {
+                                            GoveeBlePacket::Generic(_) => {
+                                                cmd.decode_for_sku(GENERIC_LIGHT)
+                                            }
+                                            decoded => decoded,
+                                        };
                                         log::debug!("Decoded: {decoded:?} for {sku}");
                                         match decoded {
                                             GoveeBlePacket::NotifyHumidifierNightlight(nl) => {
@@ -442,8 +454,18 @@ async fn run_iot_subscriber(
                                                     mode, param,
                                                 );
                                             }
+                                            GoveeBlePacket::NotifySegmentColors(page) => {
+                                                device.set_segment_colors(&page);
+                                            }
                                             GoveeBlePacket::Generic(_) => {
                                                 // Ignore packets that we can't decode
+                                            }
+                                            GoveeBlePacket::NotifyDevicePower(_)
+                                            | GoveeBlePacket::NotifyDeviceBrightness(_)
+                                            | GoveeBlePacket::NotifyDeviceColor(_) => {
+                                                // Ignore the light attributes: the same
+                                                // values arrive in packet.state above,
+                                                // already parsed.
                                             }
                                             GoveeBlePacket::SetHumidifierMode(_)
                                             | GoveeBlePacket::SetHumidifierNightlight(_) => {
