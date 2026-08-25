@@ -1,0 +1,91 @@
+name: Release
+
+# Cuts a release: stamps the add-on version from the commit date, regenerates
+# the changelog, and pushes a tag.
+#
+# The tag is what the Container Build workflow acts on. Note that a tag pushed
+# with the default GITHUB_TOKEN does not start another workflow, so unless a
+# personal access token is configured as RELEASE_TOKEN, finish by running
+# "Container Build" by hand against the new tag. This workflow prints the exact
+# instruction in its summary either way.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Tag to create (default: YYYY.MM.DD-<short sha>)"
+        required: false
+        type: string
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Determine tag name
+        id: tag
+        run: |
+          if [ -n "${{ inputs.tag_name }}" ]; then
+            TAG_NAME="${{ inputs.tag_name }}"
+          else
+            TAG_NAME=$(git -c "core.abbrev=8" show -s "--format=%cd-%h" "--date=format:%Y.%m.%d")
+          fi
+          echo "TAG_NAME=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "Releasing $TAG_NAME"
+
+      - name: Fail if the tag already exists
+        run: |
+          if git rev-parse "refs/tags/${{ steps.tag.outputs.TAG_NAME }}" >/dev/null 2>&1; then
+            echo "::error::Tag ${{ steps.tag.outputs.TAG_NAME }} already exists"
+            exit 1
+          fi
+
+      - name: Stamp the add-on version
+        env:
+          TAG_NAME: ${{ steps.tag.outputs.TAG_NAME }}
+        run: ./scripts/apply-tag.sh
+
+      - name: Generate the changelog
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: scripts/cliff.toml
+          args: --tag ${{ steps.tag.outputs.TAG_NAME }}
+        env:
+          OUTPUT: addon/CHANGELOG.md
+
+      - name: Commit and tag
+        env:
+          TAG_NAME: ${{ steps.tag.outputs.TAG_NAME }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add addon/config.yaml addon/CHANGELOG.md
+          git commit -m "Tag $TAG_NAME"
+          git tag "$TAG_NAME"
+          git push origin HEAD:${{ github.ref_name }}
+          git push origin "$TAG_NAME"
+
+      - name: Summary
+        env:
+          TAG_NAME: ${{ steps.tag.outputs.TAG_NAME }}
+        run: |
+          {
+            echo "## Released \`$TAG_NAME\`"
+            echo
+            if [ -n "${{ secrets.RELEASE_TOKEN }}" ]; then
+              echo "The Container Build workflow should have started automatically."
+            else
+              echo "**One manual step left.** A tag pushed with the default token does not"
+              echo "start another workflow, so run **Container Build** from the Actions tab"
+              echo "with the ref set to \`$TAG_NAME\` to publish the add-on image."
+              echo
+              echo "To automate this, add a personal access token with \`contents: write\`"
+              echo "as the \`RELEASE_TOKEN\` repository secret."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

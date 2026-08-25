@@ -56,7 +56,7 @@ on some networks, especially across wifi access points and routers.
 Bluetooth control is the preferred transport for lights when it is available. It
 requires the companion **Govee BLE Executor** Home Assistant integration, which
 carries out the Bluetooth work using Home Assistant's own adapters and ESPHome
-proxies. See [the component README](../component/README.md) for why the add-on
+proxies. See [docs/BLUETOOTH.md](BLUETOOTH.md) for why the add-on
 cannot reach the proxies itself.
 
 |CLI|Environment|Add-on Option|Purpose|

@@ -1,6 +1,10 @@
 name: Container Build
 
 on:
+  # Lets a tag be (re)built by hand. Pushing a tag from a workflow using the
+  # default GITHUB_TOKEN does not trigger another workflow, so this is how a
+  # release gets built without setting up a personal access token.
+  workflow_dispatch:
   pull_request:
     branches:
       - main
@@ -21,7 +25,9 @@ on:
       - ".dockerignore"
 
 env:
-  IMAGE: ghcr.io/wez/govee2mqtt
+  # Derived from the owner so that forks publish under their own namespace
+  # without editing this file.
+  IMAGE: ghcr.io/${{ github.repository_owner }}/govee2mqtt
 
 jobs:
   build:
@@ -147,7 +153,7 @@ jobs:
         run: |
           docker buildx imagetools inspect ${{ env.IMAGE }}:${{ steps.meta.outputs.version }}
   addon:
-    if: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
+    if: ${{ github.ref_type == 'tag' }}
     runs-on: ubuntu-latest
     needs:
       - merge
@@ -175,7 +181,7 @@ jobs:
             --target /data/addon
 
   test-addon:
-    if: ${{ ! ( github.event_name == 'push' && github.ref_type == 'tag' ) }}
+    if: ${{ github.ref_type != 'tag' }}
     runs-on: ubuntu-latest
     needs:
       # Note! Despite the dependency edge here to the build steps above,

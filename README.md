@@ -4,7 +4,30 @@ This repo provides a `govee` executable whose primary purpose is to act
 as a bridge between [Govee](https://govee.com) devices and Home Assistant,
 via the [Home Assistant MQTT Integration](https://www.home-assistant.io/integrations/mqtt/).
 
+> **This is a fork of [wez/govee2mqtt](https://github.com/wez/govee2mqtt)** that adds
+> Bluetooth as a preferred transport for lights, driven through Home Assistant's own
+> adapters and ESPHome Bluetooth proxies. It publishes its own images under
+> `ghcr.io/phischl/govee2mqtt`. See [docs/BLUETOOTH.md](docs/BLUETOOTH.md) for how it
+> works and [docs/CONFIG.md](docs/CONFIG.md#bluetooth-configuration) for the settings.
+>
+> Bluetooth control needs the **Govee BLE Executor** integration from this same
+> repository, installed through HACS. The add-on cannot reach the proxies itself: an
+> ESPHome proxy accepts exactly one advertisement subscriber, so it would be competing
+> with Home Assistant for it.
+
+## Installation
+
+**Add-on** — add `https://github.com/phischl/govee2mqtt` as a repository under
+Settings → Add-ons → Add-on Store → ⋮ → Repositories, then install *Govee to MQTT Bridge*.
+
+**Bluetooth integration** — add the same URL to HACS as a custom repository of type
+*Integration*, install *Govee BLE Executor*, and add it from Settings → Devices & Services.
+
 ## Features
+
+* Bluetooth control of lights through your existing ESPHome Bluetooth proxies, with
+  command coalescing and connection-slot aware scheduling. Bluetooth-only lights, which
+  upstream hides because it cannot reach them, appear in Home Assistant.
 
 * Robust LAN-first design. Not all of Govee's devices support LAN control,
   but for those that do, you'll have the lowest latency and ability to

@@ -5,7 +5,7 @@
   "config_flow": true,
   "integration_type": "hub",
   "iot_class": "local_push",
-  "documentation": "https://github.com/phischl/govee2mqtt/blob/main/component/README.md",
+  "documentation": "https://github.com/phischl/govee2mqtt/blob/main/docs/BLUETOOTH.md",
   "issue_tracker": "https://github.com/phischl/govee2mqtt/issues",
   "codeowners": ["@phischl"],
   "dependencies": ["bluetooth_adapters", "mqtt"],

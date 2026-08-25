@@ -1,5 +1,5 @@
 {
   "name": "Govee BLE Executor",
   "homeassistant": "2026.8.0",
-  "render_readme": true
+  "render_readme": false
 }

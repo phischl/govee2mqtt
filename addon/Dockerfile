@@ -1,5 +1,7 @@
 ARG BUILD_FROM
-FROM ghcr.io/wez/govee2mqtt:latest AS govee2mqtt
+# Must point at this fork's image, otherwise the add-on ships upstream's
+# binary and none of the Bluetooth work is present.
+FROM ghcr.io/phischl/govee2mqtt:latest AS govee2mqtt
 FROM $BUILD_FROM
 COPY run.sh /run.sh
 COPY --from=govee2mqtt /app/govee /app/

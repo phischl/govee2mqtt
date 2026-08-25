@@ -1,5 +1,6 @@
-# Tooling config for the companion component. It is not a distributable package;
-# Home Assistant loads it from custom_components/.
+# Tooling config for the companion Home Assistant integration under
+# custom_components/. This is not a distributable Python package; the [tool.*]
+# tables exist so ruff and pytest can find their settings from the repo root.
 
 [tool.ruff]
 line-length = 100
@@ -14,7 +15,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["PLR2004"]  # literal expectations are the point of a test
+"python-tests/*" = ["PLR2004"]  # literal expectations are the point of a test
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["python-tests"]

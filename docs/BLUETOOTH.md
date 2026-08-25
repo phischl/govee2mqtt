@@ -115,7 +115,11 @@ and reporting it would make the add-on throttle for no reason.
 
 ## Installation
 
-Via HACS as a custom repository, or by copying
+Add `https://github.com/phischl/govee2mqtt` to HACS as a custom repository of
+type *Integration*, install **Govee BLE Executor**, then add it from
+Settings → Devices & Services. Alternatively copy
 `custom_components/govee_ble_executor/` into your Home Assistant `config`
-directory. Requires the MQTT integration and at least one connectable Bluetooth
-adapter or proxy.
+directory.
+
+Requires the MQTT integration and at least one connectable Bluetooth adapter or
+proxy.
