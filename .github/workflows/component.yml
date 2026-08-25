@@ -47,7 +47,11 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
-          # This repository is primarily a Home Assistant add-on repository, so
-          # it carries no brand images and its README documents the add-on
-          # rather than the integration.
-          ignore: brands
+          # These are requirements for inclusion in the default HACS store,
+          # which this repository is not applying for. Installed as a custom
+          # repository, HACS does not check them.
+          #
+          #   brands - no icon has been contributed to home-assistant/brands
+          #   topics - repository topics are a store listing concern
+          #   issues - the fork tracks its work here, not through issues
+          ignore: brands topics issues
