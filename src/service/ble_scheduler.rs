@@ -412,6 +412,26 @@ impl BleScheduler {
         for waiter in waiters {
             let _ = waiter.send(outcome.clone());
         }
+
+        // Reading back what we just wrote is worth doing, but not worth waiting
+        // for. Holding the caller — and the concurrency permit — through three
+        // more round trips is what made a two-light hallway routine take the
+        // better part of ten seconds. The connection is still open, so the
+        // read-back costs no reconnect.
+        if outcome.is_ok() && self.config.verify_writes {
+            let queries = pending.verification_queries();
+            if !queries.is_empty() {
+                let scheduler = self.clone();
+                tokio::spawn(async move {
+                    if let Err(err) = scheduler
+                        .exchange(&state, &device_id, &sku, &address, &[], &queries, "poll")
+                        .await
+                    {
+                        log::debug!("reading back {sku} {device_id} over BLE failed: {err:#}");
+                    }
+                });
+            }
+        }
     }
 
     async fn run_session(
@@ -425,13 +445,9 @@ impl BleScheduler {
         let frames = pending.frames()?;
         anyhow::ensure!(!frames.is_empty(), "nothing to send");
 
-        let queries = if self.config.verify_writes {
-            pending.verification_queries()
-        } else {
-            vec![]
-        };
-
-        self.exchange(state, device_id, sku, address, &frames, &queries, "user")
+        // Writes only. The read-back is scheduled afterwards, off the caller's
+        // critical path; see flush_after_window.
+        self.exchange(state, device_id, sku, address, &frames, &[], "user")
             .await
     }
 
