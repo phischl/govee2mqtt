@@ -9,7 +9,7 @@ use crate::UndocApiArguments;
 use anyhow::Context;
 use async_channel::Receiver;
 use mosquitto_rs::{Event, QoS};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::time::Duration;
 use tokio::time::timeout;
 
@@ -335,19 +335,62 @@ struct StateUpdate {
 #[derive(Deserialize, Debug)]
 #[allow(unused)]
 struct OpData {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "frames_we_understand")]
     command: Vec<Base64HexBytes>,
 
     // The next 4 fields are sourced from H6199
     // <https://github.com/wez/govee2mqtt/issues/36>
-    #[serde(rename = "modeValue", default)]
+    #[serde(
+        rename = "modeValue",
+        default,
+        deserialize_with = "frames_we_understand"
+    )]
     mode_value: Vec<Base64HexBytes>,
-    #[serde(rename = "sleepValue", default)]
+    #[serde(
+        rename = "sleepValue",
+        default,
+        deserialize_with = "frames_we_understand"
+    )]
     sleep_value: Vec<Base64HexBytes>,
-    #[serde(rename = "wakeupValue", default)]
+    #[serde(
+        rename = "wakeupValue",
+        default,
+        deserialize_with = "frames_we_understand"
+    )]
     wakeup_value: Vec<Base64HexBytes>,
-    #[serde(rename = "timerValue", default)]
+    #[serde(
+        rename = "timerValue",
+        default,
+        deserialize_with = "frames_we_understand"
+    )]
     timer_value: Vec<Base64HexBytes>,
+}
+
+/// Keep the frames we can read and drop the ones we cannot.
+///
+/// A device occasionally sends something in these lists that is not a
+/// base64-wrapped 20-byte frame at all — an H7020 sent
+/// `"dfdebb7e6883b26be49d8dfa109"`, which is not even valid base64, and whose
+/// randomness fits the `supportEnc` flag that appeared in Govee's metadata on
+/// the same day. Refusing the whole message over one such entry threw away an
+/// entire status report, including every segment page in it.
+fn frames_we_understand<'de, D>(deserializer: D) -> Result<Vec<Base64HexBytes>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw = Vec::<serde_json::Value>::deserialize(deserializer)?;
+    let mut frames = Vec::with_capacity(raw.len());
+
+    for value in raw {
+        match serde_json::from_value::<Base64HexBytes>(value.clone()) {
+            Ok(frame) => frames.push(frame),
+            Err(err) => {
+                log::debug!("Ignoring a frame we cannot read: {value} ({err})");
+            }
+        }
+    }
+
+    Ok(frames)
 }
 
 impl Packet {
@@ -539,4 +582,33 @@ async fn run_iot_subscriber(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    /// One unreadable entry must not cost the whole status report. The odd
+    /// frame here is verbatim what an H7020 sent on 2026-08-25.
+    #[test]
+    fn an_unreadable_frame_does_not_discard_the_others() {
+        let json = serde_json::json!({
+            "command": [
+                "qgUNAAD/AAAAAAAAAAAAAAAAAF0=",
+                "dfdebb7e6883b26be49d8dfa109",
+            ]
+        });
+
+        let op: OpData = serde_json::from_value(json).expect("the message still parses");
+        assert_eq!(op.command.len(), 1, "the readable frame survives");
+    }
+
+    /// A list of nothing but noise is still a valid message with no frames.
+    #[test]
+    fn a_list_of_noise_yields_no_frames() {
+        let json = serde_json::json!({ "command": ["dfdebb7e6883b26be49d8dfa109"] });
+
+        let op: OpData = serde_json::from_value(json).expect("the message still parses");
+        assert!(op.command.is_empty());
+    }
 }
