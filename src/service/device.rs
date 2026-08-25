@@ -772,6 +772,30 @@ impl Device {
             .is_some_and(|info| info.entry.device_ext.device_settings.topic.is_some())
     }
 
+    /// How many segments this device has, when we can tell.
+    ///
+    /// Prefers what the device itself reported over `aa a5`, because Govee's
+    /// metadata is unreliable about the count in both directions — it claims
+    /// fifteen for a two-spot H7093 and thirty for a fifteen-bulb H7020, and
+    /// offers none at all for a twelve-segment H6054 (§17).
+    ///
+    /// Over-reporting is harmless for addressing: mask bits past the end reach
+    /// nothing. Under-reporting would leave segments untouched, which is why
+    /// the larger of the two wins.
+    pub fn segment_count(&self) -> Option<u32> {
+        let reported = self.segment_colors.keys().max().map(|highest| highest + 1);
+        let claimed = self
+            .http_device_info
+            .as_ref()
+            .and_then(|info| info.supports_segmented_rgb())
+            .map(|range| range.end);
+
+        match (reported, claimed) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (only, None) | (None, only) => only,
+        }
+    }
+
     /// Whether this device is addressed as a set of segments.
     ///
     /// Segmented devices accept the whole-device power frame but ignore the

@@ -23,10 +23,19 @@ impl BleTransport {
     /// The operations we have verified frame encodings for.
     fn handles(device: &Device, op: &DeviceOp) -> bool {
         if device.is_segmented() {
-            // Power is the only thing a segmented device honours from the
-            // generic light command set; see Device::is_segmented. Declining
-            // the rest sends it to the cloud instead of silently doing nothing.
-            return matches!(op, DeviceOp::PowerOn(_) | DeviceOp::LightPowerOn(_));
+            // A segmented device ignores the whole-strip colour write, so this
+            // used to decline everything but power and let the cloud have it.
+            // The segment command is known now (CLAUDE.md §17) and the
+            // scheduler sends colour as a mask over every segment — but only
+            // when it knows how many there are, and colour temperature still
+            // has no segment equivalent.
+            return match op {
+                DeviceOp::PowerOn(_) | DeviceOp::LightPowerOn(_) | DeviceOp::SetBrightness(_) => {
+                    true
+                }
+                DeviceOp::SetColorRgb { .. } => device.segment_count().is_some_and(|n| n > 0),
+                _ => false,
+            };
         }
 
         matches!(

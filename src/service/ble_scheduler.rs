@@ -19,7 +19,7 @@ use crate::ble::{
     decode_notification, query_device_brightness, query_device_color, query_device_power,
     query_segment_colors, Base64HexBytes, GoveeBlePacket, Kelvin, NotifySegmentColors,
     SetDeviceBrightness, SetDeviceColorRgb, SetDeviceColorTemperature, SetDevicePower,
-    GENERIC_LIGHT, SEGMENTS_PER_PAGE,
+    SetSegmentColorRgb, GENERIC_LIGHT, SEGMENTS_PER_PAGE,
 };
 use crate::lan_api::DeviceColor;
 use crate::service::ble_bridge::{
@@ -281,7 +281,11 @@ impl PendingOps {
     }
 
     /// Render to wire frames, in the order the device expects them.
-    fn frames(&self) -> anyhow::Result<Vec<Vec<u8>>> {
+    /// `segments` is `Some(count)` for a device addressed as segments. Those
+    /// ignore the whole-strip colour write — an H613D switched on over
+    /// Bluetooth and kept the colour it already had — so a colour for them is
+    /// sent as a segment command naming every segment instead.
+    fn frames(&self, segments: Option<u32>) -> anyhow::Result<Vec<Vec<u8>>> {
         let mut frames = vec![];
 
         if let Some(on) = self.power {
@@ -303,7 +307,12 @@ impl PendingOps {
         }
 
         if let Some((r, g, b)) = self.color {
-            frames.push(encode(&SetDeviceColorRgb { r, g, b })?);
+            match segments {
+                Some(count) if count > 0 => frames.push(encode(
+                    &SetSegmentColorRgb::for_segments(0..count, (r, g, b))?,
+                )?),
+                _ => frames.push(encode(&SetDeviceColorRgb { r, g, b })?),
+            }
         } else if let Some(kelvin) = self.kelvin {
             frames.push(encode(&SetDeviceColorTemperature {
                 kelvin: Kelvin::new(kelvin)?,
@@ -379,6 +388,9 @@ type Waiter = oneshot::Sender<Result<(), String>>;
 #[derive(Default)]
 struct DeviceQueue {
     address: String,
+    /// `Some(count)` when this device is addressed as segments; see
+    /// `PendingOps::frames`.
+    segments: Option<u32>,
     pending: PendingOps,
     waiters: Vec<Waiter>,
     flush_scheduled: bool,
@@ -461,6 +473,7 @@ impl BleScheduler {
             let mut devices = self.devices.lock().await;
             let queue = devices.entry(device_id.clone()).or_default();
             queue.address = address.to_string();
+            queue.segments = device.segment_count();
             for op in ops {
                 queue.pending.merge(op)?;
             }
@@ -512,7 +525,7 @@ impl BleScheduler {
     ) {
         tokio::time::sleep(self.config.coalesce_window).await;
 
-        let (address, pending, waiters) = {
+        let (address, segments, pending, waiters) = {
             let mut devices = self.devices.lock().await;
             let Some(queue) = devices.get_mut(&device_id) else {
                 return;
@@ -523,13 +536,14 @@ impl BleScheduler {
             }
             (
                 queue.address.clone(),
+                queue.segments,
                 std::mem::take(&mut queue.pending),
                 std::mem::take(&mut queue.waiters),
             )
         };
 
         let result = self
-            .run_session(&state, &device_id, &sku, &address, &pending)
+            .run_session(&state, &device_id, &sku, &address, &pending, segments)
             .await;
 
         match &result {
@@ -570,8 +584,9 @@ impl BleScheduler {
         sku: &str,
         address: &str,
         pending: &PendingOps,
+        segments: Option<u32>,
     ) -> anyhow::Result<()> {
-        let frames = pending.frames()?;
+        let frames = pending.frames(segments)?;
         anyhow::ensure!(!frames.is_empty(), "nothing to send");
 
         // Writes only. The read-back is scheduled afterwards, off the caller's
@@ -886,6 +901,32 @@ impl BleScheduler {
 mod test {
     use super::*;
 
+    /// A segmented device ignores the whole-strip colour write, so its colour
+    /// has to go out as a mask over every segment instead.
+    #[test]
+    fn a_segmented_device_gets_colour_as_a_segment_command() {
+        let mut pending = PendingOps::default();
+        pending
+            .merge(&DeviceOp::SetColorRgb { r: 0, g: 0, b: 255 })
+            .unwrap();
+
+        let plain = frames_hex(&pending);
+        assert!(
+            plain.iter().any(|f| f.starts_with("33050d")),
+            "an unsegmented device gets the whole-strip write: {plain:?}"
+        );
+
+        let segmented = frames_hex_for(&pending, Some(4));
+        let command = segmented
+            .iter()
+            .find(|f| f.starts_with("33051501"))
+            .unwrap_or_else(|| panic!("expected a segment command in {segmented:?}"));
+
+        // Blue, and a mask naming all four segments.
+        assert_eq!(&command[8..14], "0000ff");
+        assert_eq!(&command[24..26], "0f");
+    }
+
     /// A scene touching a few segments must not turn into a long radio
     /// session: each query is a write plus a notify round trip.
     #[test]
@@ -973,8 +1014,12 @@ mod test {
     }
 
     fn frames_hex(pending: &PendingOps) -> Vec<String> {
+        frames_hex_for(pending, None)
+    }
+
+    fn frames_hex_for(pending: &PendingOps, segments: Option<u32>) -> Vec<String> {
         pending
-            .frames()
+            .frames(segments)
             .unwrap()
             .into_iter()
             .map(|frame| {
