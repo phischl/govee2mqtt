@@ -49,3 +49,8 @@ schema:
   ble_max_concurrent: "int?"
   transport_order: "str?"
   ble_address_map: "str?"
+  poll_interval: "int(1,)?"
+  poll_interval_lan: "int(1,)?"
+  poll_interval_iot: "int(1,)?"
+  poll_interval_platform: "int(1,)?"
+  poll_interval_ble: "int(1,)?"

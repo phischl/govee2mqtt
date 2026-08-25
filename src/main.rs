@@ -36,6 +36,8 @@ pub struct Args {
     ble_args: BleArguments,
     #[command(flatten)]
     transport_args: TransportArguments,
+    #[command(flatten)]
+    poll_args: crate::service::poll::PollArguments,
 
     #[command(subcommand)]
     cmd: SubCommand,

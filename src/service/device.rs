@@ -1,5 +1,4 @@
 use crate::ble::{NotifyHumidifierNightlightParams, NotifySegmentColors, SegmentColor};
-use crate::commands::serve::POLL_INTERVAL;
 use crate::lan_api::{DeviceColor, DeviceStatus as LanDeviceStatus, LanDevice};
 use crate::platform_api::{
     DeviceCapability, DeviceCapabilityState, DeviceType, HttpDeviceInfo, HttpDeviceState,
@@ -177,17 +176,19 @@ impl Device {
         format!("{}_{}", self.sku, &id[id.len().saturating_sub(4)..])
     }
 
-    pub fn preferred_poll_interval(&self) -> chrono::Duration {
+    /// `configured` is the interval for the transport that will do the polling;
+    /// a device may ask for something shorter, but never something longer.
+    pub fn preferred_poll_interval(&self, configured: chrono::Duration) -> chrono::Duration {
         match self.device_type() {
             // If the kettle is on, read its temperature more frequently
             DeviceType::Kettle => {
                 if self.device_state().map(|s| s.on).unwrap_or(false) {
-                    chrono::Duration::seconds(60)
+                    chrono::Duration::seconds(60).min(configured)
                 } else {
-                    *POLL_INTERVAL
+                    configured
                 }
             }
-            _ => *POLL_INTERVAL,
+            _ => configured,
         }
     }
 

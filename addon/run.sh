@@ -107,6 +107,13 @@ if bashio::config.has_value ble_address_map ; then
   export GOVEE_BLE_ADDRESS_MAP="$(bashio::config ble_address_map)"
 fi
 
+for interval in poll_interval poll_interval_lan poll_interval_iot \
+                poll_interval_platform poll_interval_ble ; do
+  if bashio::config.has_value "$interval" ; then
+    export "GOVEE_$(echo "$interval" | tr '[:lower:]' '[:upper:]')=$(bashio::config "$interval")"
+  fi
+done
+
 if bashio::config.has_value temperature_scale ; then
   export GOVEE_TEMPERATURE_SCALE="$(bashio::config temperature_scale)"
 fi

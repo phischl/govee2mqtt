@@ -8,6 +8,7 @@ use crate::service::device::{BleAddressSource, Device};
 use crate::service::hass::spawn_hass_integration;
 use crate::service::http::run_http_server;
 use crate::service::iot::start_iot_client;
+use crate::service::poll::PollIntervals;
 use crate::service::state::StateHandle;
 use crate::undoc_api::GoveeUndocumentedApi;
 use crate::version_info::govee_version;
@@ -19,7 +20,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 
-pub static POLL_INTERVAL: Lazy<chrono::Duration> = Lazy::new(|| chrono::Duration::seconds(900));
+/// Only a fallback for the `chrono` conversion below; the real defaults and
+/// the configuration live in `service::poll`.
+static POLL_INTERVAL: Lazy<chrono::Duration> = Lazy::new(|| chrono::Duration::seconds(900));
 
 #[derive(clap::Parser, Debug)]
 pub struct ServeCommand {
@@ -83,6 +86,7 @@ async fn poll_via_ble(
     state: &StateHandle,
     device: &Device,
     now: chrono::DateTime<Utc>,
+    interval: chrono::Duration,
 ) -> anyhow::Result<()> {
     let Some(scheduler) = state.get_ble_scheduler().await else {
         return Ok(());
@@ -102,10 +106,9 @@ async fn poll_via_ble(
         return Ok(());
     }
 
-    let poll_interval = device.preferred_poll_interval();
     let due = match &device.last_polled {
         None => true,
-        Some(last) => now - last > poll_interval,
+        Some(last) => now - last > interval,
     };
     if !due {
         return Ok(());
@@ -132,7 +135,11 @@ async fn poll_via_ble(
     Ok(())
 }
 
-async fn poll_single_device(state: &StateHandle, device: &Device) -> anyhow::Result<()> {
+async fn poll_single_device(
+    state: &StateHandle,
+    device: &Device,
+    intervals: &PollIntervals,
+) -> anyhow::Result<()> {
     let now = Utc::now();
 
     if device.is_ble_only_device() == Some(true) {
@@ -140,7 +147,7 @@ async fn poll_single_device(state: &StateHandle, device: &Device) -> anyhow::Res
         // only way their state ever reaches Home Assistant. Devices that also
         // have a cloud or LAN presence keep using those; their Bluetooth writes
         // are verified within the session that issued them.
-        return poll_via_ble(state, device, now).await;
+        return poll_via_ble(state, device, now, as_chrono(intervals.ble)).await;
     }
 
     // Collect the device status via the LAN API, if possible.
@@ -151,19 +158,34 @@ async fn poll_single_device(state: &StateHandle, device: &Device) -> anyhow::Res
     // lights to flicker about a minute after polling, so it
     // is desirable to keep polling on a regular basis.
     // <https://github.com/wez/govee2mqtt/issues/250>
-    if let Some(lan_device) = &device.lan_device {
-        if let Some(client) = state.get_lan_client().await {
-            if let Ok(status) = client.query_status(lan_device).await {
-                state
-                    .device_mut(&lan_device.sku, &lan_device.device)
-                    .await
-                    .set_lan_device_status(status);
-                state.notify_of_state_change(&lan_device.device).await.ok();
+    let lan_is_stale = match &device.last_lan_device_status_update {
+        None => true,
+        Some(last) => now - last > as_chrono(intervals.lan),
+    };
+    if lan_is_stale {
+        if let Some(lan_device) = &device.lan_device {
+            if let Some(client) = state.get_lan_client().await {
+                if let Ok(status) = client.query_status(lan_device).await {
+                    state
+                        .device_mut(&lan_device.sku, &lan_device.device)
+                        .await
+                        .set_lan_device_status(status);
+                    state.notify_of_state_change(&lan_device.device).await.ok();
+                }
             }
         }
     }
 
-    let poll_interval = device.preferred_poll_interval();
+    // The interval belonging to the transport we are about to use. If AWS IoT is
+    // tried and fails we fall through to the Platform API still on the IoT
+    // interval; the two share a default, and a failed IoT poll is rare enough
+    // not to warrant a second gate.
+    let needs_platform = device.needs_platform_poll();
+    let poll_interval = device.preferred_poll_interval(as_chrono(if needs_platform {
+        intervals.platform
+    } else {
+        intervals.iot
+    }));
 
     let can_update = match &device.last_polled {
         None => true,
@@ -184,8 +206,6 @@ async fn poll_single_device(state: &StateHandle, device: &Device) -> anyhow::Res
         return Ok(());
     }
 
-    let needs_platform = device.needs_platform_poll();
-
     // Don't interrogate via HTTP if we can use the LAN.
     // If we have LAN and the device is stale, it is likely
     // offline and there is little sense in burning up request
@@ -204,17 +224,24 @@ async fn poll_single_device(state: &StateHandle, device: &Device) -> anyhow::Res
     Ok(())
 }
 
-async fn periodic_state_poll(state: StateHandle) -> anyhow::Result<()> {
+async fn periodic_state_poll(state: StateHandle, intervals: PollIntervals) -> anyhow::Result<()> {
     sleep(Duration::from_secs(20)).await;
+    let tick = intervals.tick();
     loop {
         for d in state.devices().await {
-            if let Err(err) = poll_single_device(&state, &d).await {
+            if let Err(err) = poll_single_device(&state, &d, &intervals).await {
                 log::error!("while polling {d}: {err:#}");
             }
         }
 
-        sleep(Duration::from_secs(30)).await;
+        sleep(tick).await;
     }
+}
+
+/// Poll bookkeeping is in `chrono` time while configuration is in `std::time`;
+/// this is the one place the two meet.
+fn as_chrono(duration: Duration) -> chrono::Duration {
+    chrono::Duration::from_std(duration).unwrap_or(*POLL_INTERVAL)
 }
 
 async fn enumerate_devices_via_platform_api(
@@ -450,9 +477,14 @@ impl ServeCommand {
 
         // Start periodic status polling
         {
+            let intervals = args.poll_args.intervals()?;
+            log::info!("Poll intervals: {}", intervals.describe());
+            // Also published process-wide: the diagnostic sensor decides what
+            // counts as stale from these, and it is nowhere near this call.
+            intervals.install();
             let state = state.clone();
             tokio::spawn(async move {
-                if let Err(err) = periodic_state_poll(state).await {
+                if let Err(err) = periodic_state_poll(state, intervals).await {
                     log::error!("periodic_state_poll: {err:#}");
                 }
             });

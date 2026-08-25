@@ -5,6 +5,7 @@ pub mod device;
 pub mod hass;
 pub mod http;
 pub mod iot;
+pub mod poll;
 pub mod quirks;
 pub mod segments;
 pub mod state;

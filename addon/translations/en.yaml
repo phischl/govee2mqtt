@@ -98,3 +98,86 @@ configuration:
 
 
 
+  transport_order:
+    name: Preferred transport order
+    description: >-
+      Comma separated list deciding which path a command takes first, from
+      "nightlight", "lan", "iot", "platform" and "ble". Anything you leave out
+      still gets tried, just afterwards. The default puts Bluetooth last,
+      because the LAN and cloud paths are faster and the LAN is the only one
+      that reads back what it wrote. A Bluetooth-only light is unaffected:
+      every other transport declines it, so Bluetooth serves it regardless.
+  ble_topic_prefix:
+    name: Bluetooth MQTT topic prefix
+    description: >-
+      The MQTT topics this add-on and the Govee BLE Executor integration use to
+      exchange Bluetooth jobs. Leave empty unless you changed it in the
+      integration too; the two must match. Default "gv2mqtt/ble".
+  no_ble:
+    name: Disable Bluetooth entirely
+    description: >-
+      Turns the Bluetooth transport off even when the executor integration is
+      running. Everything falls back to LAN and the cloud, and Bluetooth-only
+      devices disappear from Home Assistant because nothing can reach them.
+  ble_exclude:
+    name: Keep specific devices off Bluetooth
+    description: >-
+      Comma separated. Each entry matches a device id, a model or a name, so
+      "H601B" excludes a whole model and "15:25:60:74:F4:2B:2E:A4" a single
+      light. Bluetooth stays enabled for everything else. Entries that match
+      no device are reported in the log at startup, because a typo would
+      otherwise look like it worked.
+  ble_max_concurrent:
+    name: Concurrent Bluetooth sessions
+    description: >-
+      How many devices may be talked to over Bluetooth at the same time,
+      across all proxies. The default of 1 is the cautious choice: it never
+      competes with Home Assistant's other Bluetooth users for proxy
+      connection slots, but a scene touching three lights takes three times as
+      long. Raise it if the Govee devices are the only Bluetooth traffic you
+      have. Set the matching worker count in the Govee BLE Executor
+      integration as well; the lower of the two wins.
+  ble_address_map:
+    name: Correct Bluetooth addresses by hand
+    description: >-
+      Comma separated "device-id=AA:BB:CC:DD:EE:FF" pairs. Only needed when
+      Govee states no address for a device and the one derived from its id is
+      wrong, which the log points out at startup. Almost nobody needs this.
+  poll_interval:
+    name: Poll interval (seconds)
+    description: >-
+      How long a device's state may be stale before it is asked again. Applies
+      to the AWS IoT, Platform API and Bluetooth paths; the LAN has its own
+      setting below because it costs nothing. Default 900, which is fifteen
+      minutes. Raise it to spend fewer Govee API requests, lower it to notice
+      changes made in the Govee app sooner.
+  poll_interval_lan:
+    name: LAN poll interval (seconds)
+    description: >-
+      Seconds between status queries to devices reachable on your own network.
+      These are local UDP packets that cost nothing, so this defaults to 30.
+      Regular polling is also deliberate: some Govee firmware flickers about a
+      minute afterwards, and a predictable rhythm is easier to live with than a
+      random one.
+  poll_interval_iot:
+    name: AWS IoT poll interval (seconds)
+    description: >-
+      Seconds between status requests over Govee's own cloud channel, the one
+      their app uses. This is where per-segment colours come from, so lowering
+      it makes the "Segment 00X" entities catch up sooner after someone
+      changes a colour in the Govee app. Defaults to the general poll interval.
+  poll_interval_platform:
+    name: Platform API poll interval (seconds)
+    description: >-
+      Seconds between polls of Govee's official API. This is the one to raise
+      if you are watching your request quota: every device without an AWS IoT
+      path costs one request per interval, so thirty devices at the default of
+      900 spend roughly 2,900 requests a day. Govee returns no rate-limit
+      headers, so neither this add-on nor you can see how much is left.
+  poll_interval_ble:
+    name: Bluetooth poll interval (seconds)
+    description: >-
+      Seconds between Bluetooth polls of devices that have no other path.
+      Each poll occupies a proxy connection slot for a second or two, so a
+      short interval on many devices keeps the proxies busy. Defaults to the
+      general poll interval.

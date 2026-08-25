@@ -53,11 +53,15 @@ on some networks, especially across wifi access points and routers.
 
 ## Bluetooth Configuration
 
-Bluetooth control is the preferred transport for lights when it is available. It
-requires the companion **Govee BLE Executor** Home Assistant integration, which
-carries out the Bluetooth work using Home Assistant's own adapters and ESPHome
-proxies. See [docs/BLUETOOTH.md](BLUETOOTH.md) for why the add-on
-cannot reach the proxies itself.
+Bluetooth control requires the companion **Govee BLE Executor** Home Assistant
+integration, which carries out the Bluetooth work using Home Assistant's own
+adapters and ESPHome proxies. See [docs/BLUETOOTH.md](BLUETOOTH.md) for why the
+add-on cannot reach the proxies itself.
+
+It is tried **last** by default, after the LAN and cloud paths: those are faster
+and the LAN is the only transport that reads back what it wrote. That costs
+nothing for a Bluetooth-only light, which no other transport will touch, and
+`transport_order` promotes it for anyone who prefers local control.
 
 |CLI|Environment|Add-on Option|Purpose|
 |---|-----------|-------------|-------|
@@ -77,6 +81,60 @@ Bluetooth-only lights, which previous versions hid because there was no way to
 reach them, now appear in Home Assistant as long as their address is known.
 Their state is read back after each command and refreshed periodically on the
 usual poll interval.
+
+## Polling
+
+Nothing here changes how quickly your own commands take effect — that is
+immediate. This is about noticing changes made *elsewhere*: someone using the
+Govee app, a physical remote, or a wall switch.
+
+Each transport polls on its own schedule, because they do not cost the same
+thing. A LAN query is a UDP packet on your own network. An AWS IoT request rides
+a connection that is already open. A Platform API call spends part of a daily
+quota. A Bluetooth poll occupies a proxy connection slot for a second or two.
+A single number would force those against each other.
+
+|CLI|Environment|Add-on Option|Purpose|
+|---|-----------|-------------|-------|
+|`--poll-interval`|`GOVEE_POLL_INTERVAL=900`|`poll_interval`|Seconds a device's state may be stale before it is polled again. The default for the AWS IoT, Platform API and Bluetooth paths. Defaults to 900.|
+|`--poll-interval-lan`|`GOVEE_POLL_INTERVAL_LAN=30`|`poll_interval_lan`|Seconds between LAN status queries. Defaults to 30 — every pass of the poll loop.|
+|`--poll-interval-iot`|`GOVEE_POLL_INTERVAL_IOT=900`|`poll_interval_iot`|Seconds between AWS IoT status requests. Defaults to `--poll-interval`.|
+|`--poll-interval-platform`|`GOVEE_POLL_INTERVAL_PLATFORM=1800`|`poll_interval_platform`|Seconds between Platform API polls. Defaults to `--poll-interval`.|
+|`--poll-interval-ble`|`GOVEE_POLL_INTERVAL_BLE=900`|`poll_interval_ble`|Seconds between Bluetooth polls of Bluetooth-only devices. Defaults to `--poll-interval`.|
+
+The poll loop runs at the shortest configured interval, bounded to between 5 and
+30 seconds, so a short interval is honoured rather than silently rounded up to a
+fixed tick.
+
+### Which one to change
+
+**Segment colours feel stale.** Lower `poll_interval_iot`. Per-segment state
+arrives only over the AWS IoT channel — the Platform API reports it as empty —
+and only in reply to a poll, so segment entities are exactly as current as that
+interval.
+
+**You are worried about Govee's request quota.** Raise
+`poll_interval_platform`. Every device without an AWS IoT path costs one request
+per interval, so thirty devices at the default spend roughly 2,900 requests a
+day, plus one enumeration every ten minutes.
+
+Govee returns **no rate-limit headers** on the Platform API, so neither this
+add-on nor you can see how much of the quota is left, and there is no backoff to
+fall back on. If you are near the limit, raising the interval is the only lever.
+
+**Your proxies are busy.** Raise `poll_interval_ble`. Only Bluetooth-only
+devices are polled this way; anything with a LAN or cloud presence is left to
+those, because its Bluetooth writes are already verified inside the session that
+issued them.
+
+**A device flickers about a minute after Home Assistant starts talking to it.**
+That is [known Govee firmware behaviour](https://github.com/wez/govee2mqtt/issues/250)
+and the reason LAN polling is regular rather than opportunistic. Changing
+`poll_interval_lan` moves the rhythm; it will not remove it.
+
+Note that the diagnostic "Status" sensor calls a device missing once its state
+is older than the **longest** configured interval plus thirty seconds, so
+raising an interval will not make healthy devices report themselves as gone.
 
 ## MQTT Configuration
 
