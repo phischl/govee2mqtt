@@ -5,15 +5,21 @@ as a bridge between [Govee](https://govee.com) devices and Home Assistant,
 via the [Home Assistant MQTT Integration](https://www.home-assistant.io/integrations/mqtt/).
 
 > **This is a fork of [wez/govee2mqtt](https://github.com/wez/govee2mqtt)** that adds
-> Bluetooth as a preferred transport for lights, driven through Home Assistant's own
-> adapters and ESPHome Bluetooth proxies. It publishes its own images under
+> Bluetooth as a transport for lights, driven through Home Assistant's own adapters and
+> ESPHome Bluetooth proxies. It publishes its own images under
 > `ghcr.io/phischl/govee2mqtt`. See [docs/BLUETOOTH.md](docs/BLUETOOTH.md) for how it
 > works and [docs/CONFIG.md](docs/CONFIG.md#bluetooth-configuration) for the settings.
 >
-> Bluetooth control needs the **Govee BLE Executor** integration from this same
-> repository, installed through HACS. The add-on cannot reach the proxies itself: an
-> ESPHome proxy accepts exactly one advertisement subscriber, so it would be competing
-> with Home Assistant for it.
+> Bluetooth is tried **last** by default, after the LAN and cloud paths, which are faster
+> and better proven. That costs nothing for a Bluetooth-only light, which has no other
+> path and is served by Bluetooth regardless — and `transport_order` reorders it for
+> anyone who wants Bluetooth first.
+>
+> **Bluetooth control needs a second piece:** the *Govee BLE Executor* integration from
+> this same repository, installed through HACS. It is not optional, and without it the
+> Bluetooth transport simply declines every command. The add-on cannot reach the proxies
+> itself — an ESPHome proxy accepts exactly one advertisement subscriber, so it would be
+> competing with Home Assistant for it.
 
 ## Installation
 
@@ -22,6 +28,8 @@ Settings → Add-ons → Add-on Store → ⋮ → Repositories, then install *Go
 
 **Bluetooth integration** — add the same URL to HACS as a custom repository of type
 *Integration*, install *Govee BLE Executor*, and add it from Settings → Devices & Services.
+Required for Bluetooth; the add-on alone cannot use it. It is an integration rather than a
+second add-on, so it installs through HACS and not through the Add-on Store.
 
 ## Features
 
