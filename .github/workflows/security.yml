@@ -42,6 +42,10 @@ jobs:
           scanners: vuln,secret,misconfig
           format: sarif
           output: trivy-fs.sarif
+          # Only the plain .trivyignore is found by default; the YAML form,
+          # which is what allows a per-path exception with a reason attached,
+          # has to be named.
+          trivyignores: .trivyignore.yaml
           # Report, do not block; see the note at the top of this file.
           exit-code: "0"
 
@@ -71,6 +75,7 @@ jobs:
           image-ref: ghcr.io/${{ github.repository_owner }}/govee2mqtt:latest
           format: sarif
           output: trivy-image.sarif
+          trivyignores: .trivyignore.yaml
           exit-code: "0"
 
       - name: Upload to code scanning

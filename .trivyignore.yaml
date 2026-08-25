@@ -1,0 +1,26 @@
+# Findings that are correct about the code and wrong about this project.
+# Everything here needs a reason; anything without one should be fixed instead.
+
+misconfigurations:
+  - id: AVD-DS-0002
+    paths:
+      - "addon/Dockerfile"
+    statement: >-
+      A Home Assistant add-on runs as root by design: it needs the Supervisor
+      API and the host network. The standalone image in the root Dockerfile
+      does drop to an unprivileged user.
+
+  - id: AVD-DS-0001
+    paths:
+      - "addon/Dockerfile"
+    statement: >-
+      addon/Dockerfile deliberately pulls this fork's own :latest to get the
+      binary. It is a known wart -- it makes a tagged add-on non-reproducible,
+      recorded in CLAUDE.md section 13 -- but pinning it needs the release
+      plumbing reworked, not a different tag here.
+
+  - id: AVD-DS-0026
+    statement: >-
+      No HEALTHCHECK. The final image is distroless and has neither a shell nor
+      curl to run one with, and the add-on's liveness is the Supervisor's
+      watchdog rather than Docker's.
