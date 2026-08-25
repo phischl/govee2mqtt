@@ -171,13 +171,21 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Apply tag to version
         run: ./scripts/apply-tag.sh
+      # --cosign is deliberately absent. It makes the builder verify the Home
+      # Assistant base images, and the cosign bundled with this builder release
+      # (v2.5.3) can no longer do so: sigstore now requires v2.6.0 or later.
+      # Our own image verifies fine, so only base image verification is lost.
+      #
+      # Bumping the builder is not the fix: the monolithic action was deprecated
+      # in 2026.03.0 and removed in 2026.06.0. The real fix is migrating to the
+      # composable actions (home-assistant/builder/actions/build-image and
+      # publish-multi-arch-manifest), which is its own piece of work.
       - name: Build and Publish Home Assistant Add On
         uses: home-assistant/builder@2026.02.1
         with:
           args: |
             --amd64 \
             --aarch64 \
-            --cosign \
             --target /data/addon
 
   test-addon:
@@ -209,6 +217,7 @@ jobs:
           registry: https://ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # See the note on the addon job above for why --cosign is absent.
       - name: Test Build Home Assistant Add On
         uses: home-assistant/builder@2026.02.1
         with:
@@ -216,5 +225,4 @@ jobs:
             --test \
             --amd64 \
             --aarch64 \
-            --cosign \
             --target /data/addon
