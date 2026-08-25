@@ -97,6 +97,16 @@ pub struct DeviceState {
     pub updated: DateTime<Utc>,
 }
 
+/// Where a device's Bluetooth address came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BleAddressSource {
+    /// Stated by Govee in the account metadata. Authoritative.
+    Metadata,
+    /// Taken from the last six octets of the device id, because the metadata
+    /// carried none. A guess, and known to be off by one on H601B hardware.
+    DerivedFromId,
+}
+
 #[derive(Debug, Clone)]
 pub struct UndocDeviceInfo {
     pub room_name: Option<String>,
@@ -563,6 +573,17 @@ impl Device {
     /// device id turns out to be that same address with two bytes prepended
     /// (`47:13:CF:00:00:00:00:25` carries `CF:00:00:00:00:25`).
     pub fn ble_address(&self) -> Option<String> {
+        self.ble_address_with_source().map(|(address, _)| address)
+    }
+
+    /// The address together with where it came from.
+    ///
+    /// The distinction matters. Live traffic showed an H601B whose metadata
+    /// address is the device id **plus one** — and that is the address the lamp
+    /// answers on. So the derived form is not a second opinion on the same
+    /// value, it is a guess that is systematically wrong for at least one
+    /// device family. It only ever applies when Govee tells us nothing.
+    pub fn ble_address_with_source(&self) -> Option<(String, BleAddressSource)> {
         fn is_mac(candidate: &str) -> bool {
             let octets: Vec<&str> = candidate.split(':').collect();
             octets.len() == 6
@@ -574,7 +595,7 @@ impl Device {
         if let Some(info) = &self.undoc_device_info {
             if let Some(address) = &info.entry.device_ext.device_settings.address {
                 if is_mac(address) {
-                    return Some(address.to_uppercase());
+                    return Some((address.to_uppercase(), BleAddressSource::Metadata));
                 }
             }
         }
@@ -585,7 +606,10 @@ impl Device {
                 .iter()
                 .all(|octet| octet.len() == 2 && octet.chars().all(|c| c.is_ascii_hexdigit()))
         {
-            return Some(octets[2..].join(":").to_uppercase());
+            return Some((
+                octets[2..].join(":").to_uppercase(),
+                BleAddressSource::DerivedFromId,
+            ));
         }
 
         None

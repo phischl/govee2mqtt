@@ -4,7 +4,7 @@ use crate::service::ble_bridge::BleBridge;
 use crate::service::ble_scheduler::{
     BleAddressOverrides, BleExclusions, BleScheduler, BleSchedulerConfig,
 };
-use crate::service::device::Device;
+use crate::service::device::{BleAddressSource, Device};
 use crate::service::hass::spawn_hass_integration;
 use crate::service::http::run_http_server;
 use crate::service::iot::start_iot_client;
@@ -26,6 +26,27 @@ pub struct ServeCommand {
     /// The port on which the HTTP API will listen
     #[arg(long, default_value_t = 8056)]
     http_port: u16,
+}
+
+/// Point out devices whose Bluetooth address we had to guess.
+///
+/// Govee usually states the address; when it does not, we take the last six
+/// octets of the device id. That is a guess, and a measured one at that: an
+/// H601B's stated address is its device id plus one, so the guess would be
+/// wrong for that whole family. Saying so at startup beats letting someone
+/// puzzle over a device that advertises fine and never connects.
+async fn report_derived_ble_addresses(state: &StateHandle, overrides: &BleAddressOverrides) {
+    for device in state.devices().await {
+        if overrides.get(&device.id).is_some() {
+            continue;
+        }
+        if let Some((address, BleAddressSource::DerivedFromId)) = device.ble_address_with_source() {
+            log::info!(
+                "{device}: Govee states no Bluetooth address; guessing {address} from the \
+                 device id. Correct it with ble_exclude or ble_address_map if it does not answer."
+            );
+        }
+    }
 }
 
 /// Log what the Bluetooth exclusion list actually matched.
@@ -482,6 +503,8 @@ impl ServeCommand {
                     config.max_concurrent
                 );
             }
+
+            report_derived_ble_addresses(&state, &config.address_overrides).await;
 
             state
                 .set_ble_scheduler(Arc::new(BleScheduler::new(bridge, config)))
