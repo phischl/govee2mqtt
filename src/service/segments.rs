@@ -8,6 +8,7 @@
 //! This collects the commands that arrive together, groups them by the value
 //! they ask for, and issues one request per distinct value.
 
+use crate::ble::{Base64HexBytes, SetSegmentColorRgb, GENERIC_LIGHT};
 use crate::service::device::Device;
 use crate::service::state::StateHandle;
 use std::collections::HashMap;
@@ -47,6 +48,22 @@ impl Pending {
     /// How many requests this batch will cost.
     fn request_count(&self) -> usize {
         self.brightness.len() + self.rgb.len()
+    }
+
+    /// What is left for the Platform API once AWS IoT has taken the colours.
+    fn platform_only(&self, colour_sent: bool) -> (usize, usize) {
+        if colour_sent {
+            (
+                self.brightness.len(),
+                self.brightness.values().map(Vec::len).sum(),
+            )
+        } else {
+            (
+                self.request_count(),
+                self.brightness.values().map(Vec::len).sum::<usize>()
+                    + self.rgb.values().map(Vec::len).sum::<usize>(),
+            )
+        }
     }
 }
 
@@ -128,6 +145,23 @@ impl SegmentBatcher {
             .await
             .ok_or_else(|| anyhow::anyhow!("device {device_id} went away"))?;
 
+        // Colour goes over AWS IoT when the device is reachable that way: one
+        // message carries every colour in the batch, and it spends no Platform
+        // API quota — where fifteen segments otherwise cost fifteen requests.
+        let colour_sent = match self.send_rgb_via_iot(state, &device, pending).await {
+            Ok(sent) => sent,
+            Err(err) => {
+                // Falling back rather than failing: the Platform API below did
+                // this job before the frame was reverse-engineered.
+                log::warn!("Setting segments for {device} over IoT failed: {err:#}");
+                false
+            }
+        };
+
+        if pending.brightness.is_empty() && colour_sent {
+            return Ok(());
+        }
+
         let client = state.get_platform_client().await.ok_or_else(|| {
             anyhow::anyhow!("set segments for {device}: Platform API unavailable")
         })?;
@@ -136,9 +170,7 @@ impl SegmentBatcher {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("set segments for {device}: no HTTP device info"))?;
 
-        let requests = pending.request_count();
-        let segments: usize = pending.brightness.values().map(Vec::len).sum::<usize>()
-            + pending.rgb.values().map(Vec::len).sum::<usize>();
+        let (requests, segments) = pending.platform_only(colour_sent);
         log::info!(
             "Using Platform API to set {segments} segment change(s) on {device} \
              in {requests} request(s)"
@@ -149,11 +181,60 @@ impl SegmentBatcher {
                 .set_segment_brightness(info, segments, *percent)
                 .await?;
         }
-        for ((r, g, b), segments) in &pending.rgb {
-            client.set_segment_rgb(info, segments, *r, *g, *b).await?;
+        if !colour_sent {
+            for ((r, g, b), segments) in &pending.rgb {
+                client.set_segment_rgb(info, segments, *r, *g, *b).await?;
+            }
         }
 
         Ok(())
+    }
+
+    /// Send the batch's colours as raw frames over AWS IoT.
+    ///
+    /// Returns whether it carried them. Every colour rides in one `ptReal`
+    /// message: the frames are independent, each naming its own segments, and a
+    /// device applies several from one message — measured while restoring a
+    /// lamp after the reverse-engineering session.
+    ///
+    /// Brightness is deliberately not attempted. The read frames report it and
+    /// the Govee app sets it, but the command that does so is not known yet
+    /// (CLAUDE.md §17), so it stays on the Platform API.
+    async fn send_rgb_via_iot(
+        &self,
+        state: &StateHandle,
+        device: &Device,
+        pending: &Pending,
+    ) -> anyhow::Result<bool> {
+        if pending.rgb.is_empty() {
+            return Ok(true);
+        }
+
+        let Some(iot) = state.get_iot_client().await else {
+            return Ok(false);
+        };
+        let Some(info) = device.undoc_device_info.as_ref() else {
+            return Ok(false);
+        };
+        if !iot.is_device_compatible(&info.entry) {
+            return Ok(false);
+        }
+
+        let mut frames = vec![];
+        for ((r, g, b), segments) in &pending.rgb {
+            let command = SetSegmentColorRgb::for_segments(segments.iter().copied(), (*r, *g, *b))?;
+            frames.extend(Base64HexBytes::encode_for_sku(GENERIC_LIGHT, &command)?.base64());
+        }
+
+        let count: usize = pending.rgb.values().map(Vec::len).sum();
+        log::info!(
+            "Using AWS IoT to set {count} segment colour(s) on {device} in one message, \
+             {} frame(s)",
+            frames.len()
+        );
+
+        iot.send_real(&info.entry, frames).await?;
+        Ok(true)
     }
 }
 
@@ -184,6 +265,22 @@ mod test {
         pending.add(0, Some(50), Some((255, 255, 255)));
 
         assert_eq!(pending.request_count(), 2);
+    }
+
+    /// Once AWS IoT has carried the colours, only brightness is left for the
+    /// Platform API — which is the whole point of routing colour that way.
+    #[test]
+    fn iot_carrying_the_colours_leaves_only_brightness_for_the_cloud() {
+        let mut pending = Pending::default();
+        pending.add(0, Some(50), Some((255, 0, 0)));
+        pending.add(1, None, Some((255, 0, 0)));
+        pending.add(2, None, Some((0, 0, 255)));
+
+        // Everything over the Platform API: two colours plus one brightness.
+        assert_eq!(pending.platform_only(false), (3, 4));
+
+        // Colours over IoT: one request for the single brightness change.
+        assert_eq!(pending.platform_only(true), (1, 1));
     }
 
     #[test]

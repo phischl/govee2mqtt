@@ -334,6 +334,48 @@ impl PacketManager {
 
         all_codecs.push(PacketCodec::new(
             &[GENERIC_LIGHT],
+            |value: &SetSegmentColorRgb| {
+                anyhow::ensure!(
+                    value.mask != 0,
+                    "a segment colour command that names no segment does nothing"
+                );
+                anyhow::ensure!(
+                    value.mask >> (SEGMENT_MASK_BYTES * 8) == 0,
+                    "segment mask {:#x} does not fit in {SEGMENT_MASK_BYTES} bytes",
+                    value.mask
+                );
+
+                let mut bytes = vec![0x33, 0x05, 0x15, 0x01, value.r, value.g, value.b];
+                // Bytes 7..=11 must stay zero. A non-zero byte 7 was measured
+                // to blank three segments while the mask named one, so they are
+                // not spare room.
+                bytes.resize(SEGMENT_MASK_AT, 0);
+                bytes.extend_from_slice(&value.mask.to_le_bytes()[..SEGMENT_MASK_BYTES]);
+                Ok(finish(bytes))
+            },
+            |data| {
+                let body = notification_body(data, &[0x33, 0x05, 0x15, 0x01])?;
+                anyhow::ensure!(
+                    body.len() >= SEGMENT_MASK_AT - 4 + SEGMENT_MASK_BYTES,
+                    "segment colour command is too short: {} bytes",
+                    body.len()
+                );
+
+                let mut mask = [0u8; 8];
+                mask[..SEGMENT_MASK_BYTES]
+                    .copy_from_slice(&body[SEGMENT_MASK_AT - 4..][..SEGMENT_MASK_BYTES]);
+
+                Ok(GoveeBlePacket::SetSegmentColorRgb(SetSegmentColorRgb {
+                    r: body[0],
+                    g: body[1],
+                    b: body[2],
+                    mask: u64::from_le_bytes(mask),
+                }))
+            },
+        ));
+
+        all_codecs.push(PacketCodec::new(
+            &[GENERIC_LIGHT],
             |value: &NotifySegmentColors| {
                 let mut bytes = vec![0xaa, 0xa5, value.page];
                 for segment in &value.segments {
@@ -660,6 +702,48 @@ pub struct NotifyDeviceColor {
     pub kelvin: OptionalKelvin,
 }
 
+/// Where the segment bitmask starts in a `33 05 15 01` frame.
+pub const SEGMENT_MASK_AT: usize = 12;
+
+/// How many bytes of mask the frame has room for, between `SEGMENT_MASK_AT`
+/// and the checksum. Bits up to 24 are confirmed against hardware; the rest is
+/// what the frame allows.
+pub const SEGMENT_MASK_BYTES: usize = 7;
+
+/// Set the colour of individual segments.
+///
+/// `mask` is a little-endian bitfield: bit N addresses segment N, and segments
+/// it does not name keep the colour they had. Reverse-engineered on
+/// 2026-08-25; see CLAUDE.md §17 for the measurements, including why the five
+/// bytes before the mask have to stay zero.
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub struct SetSegmentColorRgb {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub mask: u64,
+}
+
+impl SetSegmentColorRgb {
+    /// Build a command for a set of segment indices.
+    pub fn for_segments(
+        segments: impl IntoIterator<Item = u32>,
+        (r, g, b): (u8, u8, u8),
+    ) -> anyhow::Result<Self> {
+        let mut mask = 0u64;
+        for segment in segments {
+            let bit = u64::from(segment);
+            anyhow::ensure!(
+                bit < (SEGMENT_MASK_BYTES * 8) as u64,
+                "segment {segment} is past the {} this frame can address",
+                SEGMENT_MASK_BYTES * 8
+            );
+            mask |= 1 << bit;
+        }
+        Ok(Self { r, g, b, mask })
+    }
+}
+
 /// Most segment groups an `aa a5` page can carry: the seventeen payload bytes
 /// hold a page number and four groups of four.
 pub const MAX_SEGMENTS_PER_PAGE: usize = 4;
@@ -781,6 +865,7 @@ pub enum GoveeBlePacket {
     NotifyDeviceBrightness(NotifyDeviceBrightness),
     NotifyDeviceColor(NotifyDeviceColor),
     NotifySegmentColors(NotifySegmentColors),
+    SetSegmentColorRgb(SetSegmentColorRgb),
     SetHumidifierNightlight(SetHumidifierNightlightParams),
     NotifyHumidifierMode(NotifyHumidifierMode),
     SetHumidifierMode(SetHumidifierMode),
@@ -1143,6 +1228,66 @@ a3 ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5c
     fn optional_kelvin_distinguishes_rgb_from_white() {
         assert_eq!(OptionalKelvin(0).get(), None);
         assert_eq!(OptionalKelvin(2700).get(), Some(2700));
+    }
+
+    /// Every one of these was sent to a real H6072 or H7020 and the change
+    /// confirmed by reading the `aa a5` pages back. See CLAUDE.md §17.
+    #[test]
+    fn segment_colour_commands_match_what_the_hardware_accepted() {
+        let cases = [
+            // segment 0 -> blue
+            (
+                vec![0u32],
+                (0x00, 0x00, 0xff),
+                "3305150100 00ff 0000000000 0100 0000000000 dc",
+            ),
+            // segments 3 and 5 -> white, leaving 4 alone
+            (
+                vec![3, 5],
+                (0xff, 0xff, 0xff),
+                "33051501ff ffff 0000000000 2800 0000000000 f5",
+            ),
+            // segment 15 -> red, the top bit of the first mask byte pair
+            (
+                vec![15],
+                (0xff, 0x00, 0x00),
+                "33051501ff 0000 0000000000 0080 0000000000 5d",
+            ),
+            // segment 16 -> green, which needs a third mask byte
+            (
+                vec![16],
+                (0x00, 0xff, 0x00),
+                "3305150100 ff00 0000000000 0000 0100000000 dc",
+            ),
+        ];
+
+        for (segments, colour, expected) in cases {
+            let value = SetSegmentColorRgb::for_segments(segments.clone(), colour).unwrap();
+            assert_eq!(
+                hex(&Base64HexBytes::encode_for_sku(GENERIC_LIGHT, &value).unwrap()),
+                expected.replace(' ', ""),
+                "encoding {segments:?}"
+            );
+            round_trip(
+                GENERIC_LIGHT,
+                &value,
+                GoveeBlePacket::SetSegmentColorRgb(value),
+            );
+        }
+    }
+
+    /// The frame has room for seven mask bytes and no more.
+    #[test]
+    fn a_segment_past_the_mask_is_refused() {
+        assert!(SetSegmentColorRgb::for_segments([55], (1, 2, 3)).is_ok());
+        assert!(SetSegmentColorRgb::for_segments([56], (1, 2, 3)).is_err());
+    }
+
+    /// Naming no segment would be a frame that quietly does nothing.
+    #[test]
+    fn an_empty_segment_mask_is_refused() {
+        let empty = SetSegmentColorRgb::for_segments([], (1, 2, 3)).unwrap();
+        assert!(Base64HexBytes::encode_for_sku(GENERIC_LIGHT, &empty).is_err());
     }
 
     fn segment(brightness: u8, r: u8, g: u8, b: u8) -> SegmentColor {

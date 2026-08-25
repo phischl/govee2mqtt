@@ -116,7 +116,7 @@ impl UndocCommand {
 fn parse_hex(text: &str) -> anyhow::Result<Vec<u8>> {
     let digits: String = text.chars().filter(|c| c.is_ascii_hexdigit()).collect();
     anyhow::ensure!(
-        digits.len() % 2 == 0,
+        digits.len().is_multiple_of(2),
         "'{text}' has an odd number of hex digits"
     );
     (0..digits.len())
