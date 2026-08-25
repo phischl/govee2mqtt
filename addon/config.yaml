@@ -47,3 +47,4 @@ schema:
   no_ble: "bool?"
   ble_exclude: "str?"
   ble_max_concurrent: "int?"
+  transport_order: "str?"

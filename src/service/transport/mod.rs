@@ -16,6 +16,7 @@ use crate::service::device::Device;
 use crate::service::state::StateHandle;
 use crate::temperature::TemperatureValue;
 use async_trait::async_trait;
+use clap::ValueEnum;
 use once_cell::sync::Lazy;
 use std::sync::Arc;
 
@@ -58,8 +59,34 @@ pub struct TransportArguments {
     /// the order given, followed by whatever else the operation allows. It can
     /// reorder preferences but never enables a transport an operation does not
     /// support.
+    /// You may also set this via the GOVEE_TRANSPORT_ORDER environment variable.
     #[arg(long, global = true, value_delimiter = ',')]
-    pub transport_order: Vec<TransportId>,
+    transport_order: Vec<TransportId>,
+}
+
+impl TransportArguments {
+    pub fn order(&self) -> anyhow::Result<Vec<TransportId>> {
+        if !self.transport_order.is_empty() {
+            return Ok(self.transport_order.clone());
+        }
+
+        let Some(spec) = crate::opt_env_var::<String>("GOVEE_TRANSPORT_ORDER")? else {
+            return Ok(vec![]);
+        };
+
+        let mut order = vec![];
+        for name in spec.split(',') {
+            let name = name.trim();
+            if name.is_empty() {
+                continue;
+            }
+            order.push(
+                TransportId::from_str(name, true)
+                    .map_err(|err| anyhow::anyhow!("GOVEE_TRANSPORT_ORDER: {err}"))?,
+            );
+        }
+        Ok(order)
+    }
 }
 
 /// A single, transport-agnostic thing to do to a device.
@@ -88,20 +115,33 @@ pub enum DeviceOp {
 }
 
 impl DeviceOp {
-    /// The transports to try, in order. These orderings intentionally reproduce
-    /// upstream's per-operation preferences; `Ble` is prepended wherever it makes
-    /// sense so that it wins once a BLE transport is registered.
+    /// The transports to try, in order.
+    ///
+    /// These reproduce upstream's per-operation preferences, with `Ble` added
+    /// **last**. That is deliberate and was decided after a day of live use:
+    /// stability and speed come first, and Bluetooth does not yet earn a place
+    /// ahead of paths that are proven. A LAN command is faster and verifies
+    /// itself; a cloud command is slower but dependable.
+    ///
+    /// Being last costs nothing where it matters most. A Bluetooth-only device
+    /// has no other transport, so every other one declines and Bluetooth serves
+    /// it regardless of order — and that is the capability the fork adds which
+    /// did not exist before.
+    ///
+    /// Raise it with `--transport-order` / `GOVEE_TRANSPORT_ORDER` once it has
+    /// proven itself on a given installation.
     pub fn default_transport_order(&self) -> &'static [TransportId] {
         use TransportId::*;
         match self {
-            Self::PowerOn(_) => &[Ble, Lan, Iot, Platform],
+            Self::PowerOn(_) => &[Lan, Iot, Platform, Ble],
             Self::LightPowerOn(_) | Self::SetBrightness(_) | Self::SetColorRgb { .. } => {
-                &[Nightlight, Ble, Lan, Iot, Platform]
+                &[Nightlight, Lan, Iot, Platform, Ble]
             }
-            Self::SetColorTemperature(_) => &[Ble, Lan, Iot, Platform],
+            Self::SetColorTemperature(_) => &[Lan, Iot, Platform, Ble],
             // Scenes prefer the Platform API because the LAN encoding is separate;
             // `PlatformTransport` declines when `avoid_platform_api()` is set.
-            Self::SetScene(_) => &[Ble, Platform, Lan],
+            // Bluetooth has no verified scene encoding, so it is not offered.
+            Self::SetScene(_) => &[Platform, Lan],
             Self::SetHumidifierParameter { .. } => &[Iot, Platform],
             Self::SetTargetTemperature { .. } => &[Platform],
         }
@@ -296,8 +336,10 @@ mod test {
 
     #[test]
     fn order_without_override_is_the_default() {
+        // Bluetooth last: proven paths first, and a Bluetooth-only device is
+        // served regardless because everything else declines.
         let op = DeviceOp::PowerOn(true);
-        assert_eq!(resolve_order(&op, None), vec![Ble, Lan, Iot, Platform]);
+        assert_eq!(resolve_order(&op, None), vec![Lan, Iot, Platform, Ble]);
     }
 
     #[test]
@@ -305,7 +347,7 @@ mod test {
         let op = DeviceOp::PowerOn(true);
         assert_eq!(
             resolve_order(&op, Some(&[Platform, Iot])),
-            vec![Platform, Iot, Ble, Lan]
+            vec![Platform, Iot, Lan, Ble]
         );
     }
 
@@ -322,6 +364,6 @@ mod test {
     #[test]
     fn scenes_keep_platform_ahead_of_lan() {
         let op = DeviceOp::SetScene("Sunrise".to_string());
-        assert_eq!(resolve_order(&op, None), vec![Ble, Platform, Lan]);
+        assert_eq!(resolve_order(&op, None), vec![Platform, Lan]);
     }
 }

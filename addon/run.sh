@@ -99,6 +99,10 @@ if bashio::config.has_value ble_max_concurrent ; then
   export GOVEE_BLE_MAX_CONCURRENT="$(bashio::config ble_max_concurrent)"
 fi
 
+if bashio::config.has_value transport_order ; then
+  export GOVEE_TRANSPORT_ORDER="$(bashio::config transport_order)"
+fi
+
 if bashio::config.has_value temperature_scale ; then
   export GOVEE_TEMPERATURE_SCALE="$(bashio::config temperature_scale)"
 fi

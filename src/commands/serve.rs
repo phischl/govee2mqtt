@@ -434,14 +434,10 @@ impl ServeCommand {
         }
 
         // start advertising on local mqtt
-        if !args.transport_args.transport_order.is_empty() {
-            log::info!(
-                "Preferred transport order: {:?}",
-                args.transport_args.transport_order
-            );
-            state
-                .set_transport_order(Some(args.transport_args.transport_order.clone()))
-                .await;
+        let transport_order = args.transport_args.order()?;
+        if !transport_order.is_empty() {
+            log::info!("Preferred transport order: {transport_order:?}");
+            state.set_transport_order(Some(transport_order)).await;
         }
 
         // Set up before the MQTT loop starts: the loop registers routes for the
