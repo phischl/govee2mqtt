@@ -1,4 +1,6 @@
-use crate::ble::{NotifyHumidifierNightlightParams, NotifySegmentColors, SegmentColor};
+use crate::ble::{
+    NotifyHumidifierNightlightParams, NotifySegmentColors, SegmentColor, SEGMENTS_PER_PAGE,
+};
 use crate::lan_api::{DeviceColor, DeviceStatus as LanDeviceStatus, LanDevice};
 use crate::platform_api::{
     DeviceCapability, DeviceCapabilityState, DeviceType, HttpDeviceInfo, HttpDeviceState,
@@ -46,6 +48,9 @@ pub struct Device {
     /// status request, so they refresh on the poll interval rather than live.
     pub segment_colors: HashMap<u32, SegmentColor>,
     pub last_segment_colors_update: Option<DateTime<Utc>>,
+    /// How many segments this device packs into one `aa a5` page. Learned from
+    /// the frames, then kept; see `set_segment_colors`.
+    segment_page_stride: Option<usize>,
 
     pub nightlight_state: Option<NotifyHumidifierNightlightParams>,
     pub target_humidity_percent: Option<u8>,
@@ -200,15 +205,40 @@ impl Device {
         self.last_polled.replace(Utc::now());
     }
 
-    /// Merge one page of segment colours into the picture.
+    /// Merge a status message's segment pages into the picture.
     ///
-    /// Pages are merged rather than replacing the map wholesale: they arrive as
-    /// separate frames, and a device that reports only some of them should
-    /// still update the segments it did report.
-    pub fn set_segment_colors(&mut self, page: &NotifySegmentColors) {
-        let first = page.first_segment_index();
-        for (n, segment) in page.segments.iter().enumerate() {
-            self.segment_colors.insert(first + n as u32, *segment);
+    /// Takes the whole batch rather than one page, because how many segments a
+    /// page carries is a property of the device and cannot be read reliably
+    /// from a single frame: a three-group device pads with zeroes, and a
+    /// four-group device whose last segment is switched off — black, see §15 —
+    /// looks identical. Across a batch, one page using its fourth group settles
+    /// it, and the answer is kept so a later batch that happens to end in black
+    /// cannot shift the whole map.
+    ///
+    /// Pages are merged rather than replacing the map wholesale, so a device
+    /// that reports only some of them still updates the segments it did report.
+    pub fn set_segment_colors(&mut self, pages: &[NotifySegmentColors]) {
+        if pages.is_empty() {
+            return;
+        }
+
+        let observed = pages
+            .iter()
+            .map(|page| page.groups_used())
+            .max()
+            .unwrap_or(SEGMENTS_PER_PAGE);
+        // Sticky at the widest layout ever seen for this device.
+        let stride = match self.segment_page_stride {
+            Some(known) => known.max(observed),
+            None => observed,
+        };
+        self.segment_page_stride = Some(stride);
+
+        for page in pages {
+            let first = page.first_segment_index(stride);
+            for (n, segment) in page.segments[..stride].iter().enumerate() {
+                self.segment_colors.insert(first + n as u32, *segment);
+            }
         }
         self.last_segment_colors_update.replace(Utc::now());
     }
@@ -916,6 +946,90 @@ mod test {
         });
 
         assert_eq!(device.ble_address().as_deref(), Some("CF:00:00:00:00:25"));
+    }
+
+    fn segment_page(hex: &str) -> NotifySegmentColors {
+        let bytes: Vec<u8> = (0..hex.len())
+            .step_by(2)
+            .map(|n| u8::from_str_radix(&hex[n..n + 2], 16).unwrap())
+            .collect();
+        match crate::ble::decode_notification(crate::ble::GENERIC_LIGHT, &bytes) {
+            crate::ble::GoveeBlePacket::NotifySegmentColors(page) => page,
+            other => panic!("expected a segment page, got {other:?}"),
+        }
+    }
+
+    /// H6072: three groups a page, the fourth quad zero padding. Nine slots
+    /// for eight segments, the ninth carrying filler.
+    #[test]
+    fn a_three_group_device_maps_three_segments_per_page() {
+        let pages = [
+            segment_page("aaa5015fff00005f00ff005fffff000000000051"),
+            segment_page("aaa5025f00ff005fff00ff5f00ff000000000052"),
+            segment_page("aaa5035f00ffff5f00ff002a5f5f5f0000000086"),
+        ];
+
+        let mut device = Device::new("H6072", "FC:20:CF:33:34:38:29:59");
+        device.set_segment_colors(&pages);
+
+        assert_eq!(device.segment_color(0).unwrap().r, 0xff, "segment 1 is red");
+        assert_eq!(
+            device.segment_color(3).unwrap().g,
+            0xff,
+            "page 2 starts at 4"
+        );
+        assert_eq!(
+            device.segment_color(6).unwrap().b,
+            0xff,
+            "page 3 starts at 7"
+        );
+        assert_eq!(device.segment_color(9), None, "nothing past the ninth slot");
+    }
+
+    /// H6054: two light bars of six, so four groups a page and twelve segments.
+    /// Captured from the device and checked against the Govee app, which shows
+    /// the bars as purple and blue at 50/51 %.
+    #[test]
+    fn a_four_group_device_maps_four_segments_per_page() {
+        let pages = [
+            segment_page("aaa501338b00ff338b00ff328b00ff328b00ff0e"),
+            segment_page("aaa502328b00ff328b00ff330000ff330000ff0d"),
+            segment_page("aaa503330000ff330000ff320000ff320000ff0c"),
+        ];
+
+        let mut device = Device::new("H6054", "5B:49:D7:39:32:37:5A:3E");
+        device.set_segment_colors(&pages);
+
+        // Twelve segments, not the nine a three-group stride would give.
+        assert_eq!(device.segment_colors.len(), 12);
+
+        // Six purple then six blue, matching the two bars in the app.
+        for n in 0..6 {
+            let c = device.segment_color(n).expect("a purple segment");
+            assert_eq!((c.r, c.g, c.b), (0x8b, 0x00, 0xff), "segment {n}");
+        }
+        for n in 6..12 {
+            let c = device.segment_color(n).expect("a blue segment");
+            assert_eq!((c.r, c.g, c.b), (0x00, 0x00, 0xff), "segment {n}");
+        }
+    }
+
+    /// Once a device has shown four groups the stride sticks, so a later batch
+    /// whose last segment happens to be switched off — black, and therefore
+    /// indistinguishable from padding — cannot shift the whole map.
+    #[test]
+    fn the_page_stride_does_not_narrow_again() {
+        let mut device = Device::new("H6054", "5B:49:D7:39:32:37:5A:3E");
+        device.set_segment_colors(&[segment_page("aaa501338b00ff338b00ff328b00ff328b00ff0e")]);
+        assert_eq!(device.segment_colors.len(), 4);
+
+        // Same device, but every fourth segment now off.
+        device.set_segment_colors(&[segment_page("aaa502328b00ff328b00ff330000ff00000000c1")]);
+        assert_eq!(
+            device.segment_color(4).map(|c| (c.r, c.g, c.b)),
+            Some((0x8b, 0x00, 0xff)),
+            "page 2 must still start at segment 4"
+        );
     }
 
     /// The model list this used to consult had drifted so far that ten of the

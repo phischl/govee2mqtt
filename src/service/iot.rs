@@ -416,6 +416,7 @@ async fn run_iot_subscriber(
                                     state.on = true;
                                 }
 
+                                let mut segment_pages = vec![];
                                 if let Some(op) = &packet.op {
                                     for cmd in &op.command {
                                         // A device's status carries generic light
@@ -455,7 +456,11 @@ async fn run_iot_subscriber(
                                                 );
                                             }
                                             GoveeBlePacket::NotifySegmentColors(page) => {
-                                                device.set_segment_colors(&page);
+                                                // Collected rather than applied
+                                                // one at a time: the page
+                                                // stride can only be read
+                                                // reliably from the whole set.
+                                                segment_pages.push(page);
                                             }
                                             GoveeBlePacket::Generic(_) => {
                                                 // Ignore packets that we can't decode
@@ -481,6 +486,10 @@ async fn run_iot_subscriber(
                                             }
                                         }
                                     }
+                                }
+
+                                if !segment_pages.is_empty() {
+                                    device.set_segment_colors(&segment_pages);
                                 }
 
                                 // Check on/off last, as we can synthesize "on"

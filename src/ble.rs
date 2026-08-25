@@ -343,7 +343,7 @@ impl PacketManager {
             },
             |data| {
                 // One page byte, then four bytes per segment.
-                const PAGE_LEN: usize = 1 + SEGMENTS_PER_PAGE * 4;
+                const PAGE_LEN: usize = 1 + MAX_SEGMENTS_PER_PAGE * 4;
 
                 let body = notification_body(data, &[0xaa, 0xa5])?;
                 anyhow::ensure!(
@@ -355,7 +355,7 @@ impl PacketManager {
                 let page = body[0];
                 anyhow::ensure!(page > 0, "segment pages are numbered from 1, got {page}");
 
-                let mut segments = [SegmentColor::default(); SEGMENTS_PER_PAGE];
+                let mut segments = [SegmentColor::default(); MAX_SEGMENTS_PER_PAGE];
                 for (n, segment) in segments.iter_mut().enumerate() {
                     let at = 1 + n * 4;
                     *segment = SegmentColor {
@@ -660,7 +660,12 @@ pub struct NotifyDeviceColor {
     pub kelvin: OptionalKelvin,
 }
 
-/// Number of segments carried by one `aa a5` page.
+/// Most segment groups an `aa a5` page can carry: the seventeen payload bytes
+/// hold a page number and four groups of four.
+pub const MAX_SEGMENTS_PER_PAGE: usize = 4;
+
+/// What most SKUs actually use. H6072, H7020 and H60B2 send three groups and
+/// leave the last four bytes zero; an H6054 fills all four. See §17.
 pub const SEGMENTS_PER_PAGE: usize = 3;
 
 /// One segment's colour, as it appears inside an `aa a5` page.
@@ -684,15 +689,32 @@ pub struct SegmentColor {
 /// describe, so the trailing slots of the last page can be filler.
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
 pub struct NotifySegmentColors {
-    /// 1-based: page 1 describes segments 0..=2, page 2 segments 3..=5.
+    /// 1-based. Which segments it describes depends on the stride, which is a
+    /// property of the device rather than of the page — see `groups_used`.
     pub page: u8,
-    pub segments: [SegmentColor; SEGMENTS_PER_PAGE],
+    pub segments: [SegmentColor; MAX_SEGMENTS_PER_PAGE],
 }
 
 impl NotifySegmentColors {
-    /// Index of the first segment this page describes.
-    pub fn first_segment_index(&self) -> u32 {
-        u32::from(self.page.saturating_sub(1)) * SEGMENTS_PER_PAGE as u32
+    /// Index of the first segment this page describes, given the device's
+    /// stride.
+    pub fn first_segment_index(&self, stride: usize) -> u32 {
+        u32::from(self.page.saturating_sub(1)) * stride as u32
+    }
+
+    /// How many groups this page appears to use.
+    ///
+    /// A three-group device leaves the last four bytes zero, so a non-zero
+    /// fourth group means four. Read one page at a time this is *nearly* safe:
+    /// a segment switched off is set to black (§15), which looks exactly like
+    /// padding. Deciding from a whole status batch and keeping the answer —
+    /// which `Device::set_segment_colors` does — contains that.
+    pub fn groups_used(&self) -> usize {
+        if self.segments[MAX_SEGMENTS_PER_PAGE - 1] == SegmentColor::default() {
+            SEGMENTS_PER_PAGE
+        } else {
+            MAX_SEGMENTS_PER_PAGE
+        }
     }
 }
 
@@ -1147,6 +1169,7 @@ a3 ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5c
                         segment(0x5f, 0xff, 0x00, 0x00),
                         segment(0x5f, 0x00, 0xff, 0x00),
                         segment(0x5f, 0xff, 0xff, 0x00),
+                        SegmentColor::default(),
                     ],
                 },
             ),
@@ -1158,6 +1181,7 @@ a3 ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5c
                         segment(0x5f, 0x00, 0xff, 0x00),
                         segment(0x5f, 0xff, 0x00, 0xff),
                         segment(0x5f, 0x00, 0xff, 0x00),
+                        SegmentColor::default(),
                     ],
                 },
             ),
@@ -1169,6 +1193,7 @@ a3 ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5c
                         segment(0x5f, 0x00, 0xff, 0xff),
                         segment(0x5f, 0x00, 0xff, 0x00),
                         segment(0x2a, 0x5f, 0x5f, 0x5f),
+                        SegmentColor::default(),
                     ],
                 },
             ),
@@ -1204,9 +1229,12 @@ a3 ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5c
             ..Default::default()
         };
 
-        assert_eq!(page_of(1).first_segment_index(), 0);
-        assert_eq!(page_of(2).first_segment_index(), 3);
-        assert_eq!(page_of(3).first_segment_index(), 6);
+        assert_eq!(page_of(1).first_segment_index(SEGMENTS_PER_PAGE), 0);
+        assert_eq!(page_of(2).first_segment_index(SEGMENTS_PER_PAGE), 3);
+        assert_eq!(page_of(3).first_segment_index(SEGMENTS_PER_PAGE), 6);
+
+        // An H6054 packs four to a page, so page 2 starts at segment 4.
+        assert_eq!(page_of(2).first_segment_index(MAX_SEGMENTS_PER_PAGE), 4);
     }
 
     /// Page 0 would collide with segment 0 of page 1, so it is rejected rather
