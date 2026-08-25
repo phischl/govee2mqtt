@@ -37,7 +37,14 @@ pub struct Quirk {
     /// If true, we can correctly parse all appropriate
     /// packets from the MQTT subscription and apply
     /// their state.
-    pub iot_api_supported: bool,
+    /// Whether AWS IoT may be used, when the quirk has an opinion at all.
+    ///
+    /// `None` -- the usual case -- means "ask Govee": a device its metadata
+    /// gives an MQTT topic for can be reached this way. `Some(false)` is a
+    /// veto for the handful of models where IoT misbehaves despite having a
+    /// topic. `Some(true)` records a model as known-good and is otherwise
+    /// redundant, since a topic is required either way.
+    pub iot_api_supported: Option<bool>,
     pub show_as_preset_buttons: Option<&'static [&'static str]>,
 }
 
@@ -59,7 +66,7 @@ impl Quirk {
             device_type,
             platform_temperature_sensor_units: None,
             platform_humidity_sensor_units: None,
-            iot_api_supported: false,
+            iot_api_supported: None,
             show_as_preset_buttons: None,
         }
     }
@@ -109,7 +116,7 @@ impl Quirk {
     }
 
     pub fn with_iot_api_support(mut self, supported: bool) -> Self {
-        self.iot_api_supported = supported;
+        self.iot_api_supported = Some(supported);
         self
     }
 

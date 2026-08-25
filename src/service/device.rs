@@ -705,12 +705,34 @@ impl Device {
             .unwrap_or(false)
     }
 
+    /// Whether commands and status requests may go over Govee's AWS IoT broker.
+    ///
+    /// Govee's own metadata decides this, not a model list. A device the
+    /// account gives an MQTT topic for can be reached this way whatever it is;
+    /// one without a topic cannot be reached at all, which is the same test
+    /// `IotClient::is_device_compatible` applies before publishing.
+    ///
+    /// This used to be a hardcoded list in `quirks.rs`, and it had drifted
+    /// badly: of eleven models on the author's account only one was listed, so
+    /// ten of them fell back to the Platform API and its daily request quota
+    /// while answering IoT status requests perfectly well.
     pub fn iot_api_supported(&self) -> bool {
-        if let Some(quirk) = self.resolve_quirk() {
-            return quirk.iot_api_supported;
+        if !self.has_iot_topic() {
+            return false;
         }
 
-        false
+        // A quirk may still veto it, for models where IoT misbehaves despite
+        // Govee handing them a topic.
+        self.resolve_quirk()
+            .and_then(|quirk| quirk.iot_api_supported)
+            .unwrap_or(true)
+    }
+
+    /// Whether Govee's account metadata names an MQTT topic for this device.
+    pub fn has_iot_topic(&self) -> bool {
+        self.undoc_device_info
+            .as_ref()
+            .is_some_and(|info| info.entry.device_ext.device_settings.topic.is_some())
     }
 
     /// Whether this device is addressed as a set of segments.
@@ -894,6 +916,60 @@ mod test {
         });
 
         assert_eq!(device.ble_address().as_deref(), Some("CF:00:00:00:00:25"));
+    }
+
+    /// The model list this used to consult had drifted so far that ten of the
+    /// eleven models on the author's account were missing from it, and every one
+    /// of them spent Platform API quota while answering IoT perfectly well.
+    #[test]
+    fn iot_support_follows_the_topic_not_the_model_list() {
+        let mut device = Device::new("H601B", "15:25:60:74:F4:2B:2E:A4");
+        assert!(
+            crate::service::quirks::resolve_quirk("H601B").is_none(),
+            "this test is only meaningful for a model with no quirk"
+        );
+
+        // No metadata at all: nothing to publish to.
+        assert!(!device.iot_api_supported());
+
+        device.undoc_device_info.replace(UndocDeviceInfo {
+            room_name: None,
+            entry: undoc_entry_without_wifi(),
+        });
+        assert!(device.has_iot_topic());
+        assert!(device.iot_api_supported());
+    }
+
+    /// A device Govee gives no MQTT topic for cannot be reached over IoT no
+    /// matter what any list says -- the same test the IoT client applies before
+    /// it publishes.
+    #[test]
+    fn no_topic_means_no_iot() {
+        let mut entry = undoc_entry_without_wifi();
+        entry.device_ext.device_settings.topic = None;
+
+        let mut device = Device::new("H6072", "FC:20:CF:33:34:38:29:59");
+        device.undoc_device_info.replace(UndocDeviceInfo {
+            room_name: None,
+            entry,
+        });
+
+        assert!(!device.has_iot_topic());
+        assert!(!device.iot_api_supported());
+    }
+
+    /// A quirk keeps the power to veto, for models where IoT misbehaves even
+    /// though Govee hands them a topic.
+    #[test]
+    fn a_quirk_can_still_veto_iot() {
+        let mut device = Device::new("H6176", "AA:BB:CC:DD:EE:FF:11:22");
+        device.undoc_device_info.replace(UndocDeviceInfo {
+            room_name: None,
+            entry: undoc_entry_without_wifi(),
+        });
+
+        assert!(device.has_iot_topic());
+        assert!(!device.iot_api_supported());
     }
 
     #[test]
