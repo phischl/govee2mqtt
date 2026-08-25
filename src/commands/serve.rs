@@ -1,5 +1,7 @@
 use crate::lan_api::Client as LanClient;
 use crate::platform_api::GoveeApiClient;
+use crate::service::ble_bridge::BleBridge;
+use crate::service::ble_scheduler::{BleScheduler, BleSchedulerConfig};
 use crate::service::device::Device;
 use crate::service::hass::spawn_hass_integration;
 use crate::service::http::run_http_server;
@@ -348,6 +350,35 @@ impl ServeCommand {
         }
 
         // start advertising on local mqtt
+        if !args.transport_args.transport_order.is_empty() {
+            log::info!(
+                "Preferred transport order: {:?}",
+                args.transport_args.transport_order
+            );
+            state
+                .set_transport_order(Some(args.transport_args.transport_order.clone()))
+                .await;
+        }
+
+        // Set up before the MQTT loop starts: the loop registers routes for the
+        // executor's topics only if a scheduler exists, and the retained status
+        // message arrives as soon as we subscribe.
+        if args.ble_args.is_disabled()? {
+            log::info!("BLE transport is disabled by --no-ble");
+        } else {
+            let bridge = Arc::new(BleBridge::new(args.ble_args.topic_prefix()?));
+            log::info!(
+                "BLE transport will talk to the govee_ble_executor integration on {}",
+                bridge.request_topic()
+            );
+            state
+                .set_ble_scheduler(Arc::new(BleScheduler::new(
+                    bridge,
+                    BleSchedulerConfig::default(),
+                )))
+                .await;
+        }
+
         spawn_hass_integration(state.clone(), &args.hass_args).await?;
 
         run_http_server(state.clone(), self.http_port)

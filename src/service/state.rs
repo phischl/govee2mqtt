@@ -1,5 +1,6 @@
 use crate::lan_api::{Client as LanClient, DeviceStatus as LanDeviceStatus, LanDevice};
 use crate::platform_api::{DeviceCapability, DeviceType, GoveeApiClient};
+use crate::service::ble_scheduler::BleScheduler;
 use crate::service::coordinator::Coordinator;
 use crate::service::device::Device;
 use crate::service::hass::{topic_safe_id, HassClient};
@@ -26,6 +27,7 @@ pub struct State {
     hass_client: Mutex<Option<HassClient>>,
     hass_discovery_prefix: Mutex<String>,
     temperature_scale: Mutex<TemperatureScale>,
+    ble_scheduler: Mutex<Option<Arc<BleScheduler>>>,
     /// Optional configured transport priority prefix; see `service::transport`.
     transport_order: Mutex<Option<Vec<TransportId>>>,
 }
@@ -48,6 +50,14 @@ impl State {
     /// Configure a transport priority prefix. Wired up to configuration in the
     /// milestone that introduces the BLE transport.
     #[allow(dead_code)]
+    pub async fn set_ble_scheduler(&self, scheduler: Arc<BleScheduler>) {
+        self.ble_scheduler.lock().await.replace(scheduler);
+    }
+
+    pub async fn get_ble_scheduler(&self) -> Option<Arc<BleScheduler>> {
+        self.ble_scheduler.lock().await.clone()
+    }
+
     pub async fn set_transport_order(&self, order: Option<Vec<TransportId>>) {
         *self.transport_order.lock().await = order;
     }

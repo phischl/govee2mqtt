@@ -7,6 +7,7 @@ use crate::hass_mqtt::select::mqtt_set_mode_scene;
 use crate::lan_api::DeviceColor;
 use crate::opt_env_var;
 use crate::platform_api::{from_json, DeviceType};
+use crate::service::ble_bridge::{BridgeStatus, JobResponse};
 use crate::service::device::Device as ServiceDevice;
 use crate::service::state::StateHandle;
 use crate::temperature::TemperatureScale;
@@ -395,6 +396,42 @@ async fn mqtt_light_segment_command(
     Ok(())
 }
 
+async fn mqtt_ble_response(
+    Payload(payload): Payload<String>,
+    State(state): State<StateHandle>,
+) -> anyhow::Result<()> {
+    let Some(scheduler) = state.get_ble_scheduler().await else {
+        return Ok(());
+    };
+    let response: JobResponse =
+        from_json(&payload).context("parsing a response from the BLE executor")?;
+    scheduler.bridge().handle_response(response).await;
+    Ok(())
+}
+
+async fn mqtt_ble_status(
+    Payload(payload): Payload<String>,
+    State(state): State<StateHandle>,
+) -> anyhow::Result<()> {
+    if let Some(scheduler) = state.get_ble_scheduler().await {
+        // A retained empty payload is how the broker reports a cleared status.
+        if payload.trim().is_empty() {
+            scheduler.bridge().mark_offline();
+            return Ok(());
+        }
+        let status: BridgeStatus =
+            from_json(&payload).context("parsing status from the BLE executor")?;
+        log::debug!(
+            "BLE executor status: online={} queue={} free slots={}",
+            status.online,
+            status.queue_depth,
+            status.free_slots()
+        );
+        scheduler.bridge().set_status(status);
+    }
+    Ok(())
+}
+
 async fn mqtt_purge_caches(State(state): State<StateHandle>) -> anyhow::Result<()> {
     log::info!("mqtt_purge_caches");
     crate::cache::purge_cache()?;
@@ -569,6 +606,16 @@ async fn run_mqtt_loop(
             .route("gv2mqtt/:id/set-mode-scene", mqtt_set_mode_scene)
             .await?;
 
+        // Replies and health from the govee_ble_executor Home Assistant
+        // integration. Registered even when BLE is disabled so that a retained
+        // status message does not sit unread on the broker.
+        if let Some(bridge) = state.get_ble_scheduler().await.map(|s| s.bridge().clone()) {
+            router
+                .route(bridge.response_topic(), mqtt_ble_response)
+                .await?;
+            router.route(bridge.status_topic(), mqtt_ble_status).await?;
+        }
+
         tokio::time::sleep(HASS_REGISTER_DELAY).await;
         state
             .get_hass_client()
@@ -597,6 +644,9 @@ async fn run_mqtt_loop(
             }
             Event::Disconnected(reason) => {
                 log::warn!("MQTT disconnected with reason={reason}");
+                if let Some(scheduler) = state.get_ble_scheduler().await {
+                    scheduler.bridge().mark_offline();
+                }
                 need_rebuild = true;
             }
             Event::Connected(status) => {

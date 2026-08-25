@@ -83,6 +83,14 @@ if bashio::config.has_value scan ; then
   export GOVEE_LAN_SCAN="$(bashio::config scan)"
 fi
 
+if bashio::config.has_value ble_topic_prefix ; then
+  export GOVEE_BLE_TOPIC_PREFIX="$(bashio::config ble_topic_prefix)"
+fi
+
+if bashio::config.has_value no_ble ; then
+  export GOVEE_BLE_DISABLE="$(bashio::config no_ble)"
+fi
+
 if bashio::config.has_value temperature_scale ; then
   export GOVEE_TEMPERATURE_SCALE="$(bashio::config temperature_scale)"
 fi

@@ -1,6 +1,8 @@
 use crate::lan_api::LanDiscoArguments;
 use crate::platform_api::GoveeApiArguments;
+use crate::service::ble_bridge::BleArguments;
 use crate::service::hass::HassArguments;
+use crate::service::transport::TransportArguments;
 use crate::undoc_api::{should_log_sensitive_data, UndocApiArguments};
 use anyhow::Context;
 use clap::Parser;
@@ -30,6 +32,10 @@ pub struct Args {
     undoc_args: UndocApiArguments,
     #[command(flatten)]
     hass_args: HassArguments,
+    #[command(flatten)]
+    ble_args: BleArguments,
+    #[command(flatten)]
+    transport_args: TransportArguments,
 
     #[command(subcommand)]
     cmd: SubCommand,

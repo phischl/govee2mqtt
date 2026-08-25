@@ -1,3 +1,5 @@
+pub mod ble_bridge;
+pub mod ble_scheduler;
 pub mod coordinator;
 pub mod device;
 pub mod hass;

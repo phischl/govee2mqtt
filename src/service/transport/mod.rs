@@ -6,6 +6,7 @@
 //! implementations describing *how*, so that a new transport (BLE) can be slotted in
 //! without touching every operation.
 
+pub mod ble;
 pub mod iot;
 pub mod lan;
 pub mod nightlight;
@@ -21,7 +22,7 @@ use std::sync::Arc;
 /// Identifies a transport. The ordering of the variants is not meaningful;
 /// priority is decided per operation by [`DeviceOp::default_transport_order`]
 /// and may be overridden by configuration.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, clap::ValueEnum)]
 pub enum TransportId {
     /// Bluetooth LE, executed by the companion Home Assistant component.
     Ble,
@@ -46,6 +47,19 @@ impl std::fmt::Display for TransportId {
         };
         fmt.write_str(s)
     }
+}
+
+#[derive(clap::Parser, Debug, Default)]
+pub struct TransportArguments {
+    /// Override which transports are preferred, as a comma separated list of
+    /// `ble`, `nightlight`, `lan`, `iot`, `platform`.
+    ///
+    /// Acts as a priority prefix: the transports named here are tried first, in
+    /// the order given, followed by whatever else the operation allows. It can
+    /// reorder preferences but never enables a transport an operation does not
+    /// support.
+    #[arg(long, global = true, value_delimiter = ',')]
+    pub transport_order: Vec<TransportId>,
 }
 
 /// A single, transport-agnostic thing to do to a device.
@@ -146,6 +160,7 @@ pub trait Transport: Send + Sync {
 static TRANSPORTS: Lazy<Vec<Arc<dyn Transport>>> = Lazy::new(|| {
     vec![
         Arc::new(nightlight::NightlightTransport) as Arc<dyn Transport>,
+        Arc::new(ble::BleTransport),
         Arc::new(lan::LanTransport),
         Arc::new(iot::IotTransport),
         Arc::new(platform::PlatformTransport),

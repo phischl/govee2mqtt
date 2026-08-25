@@ -51,6 +51,25 @@ on some networks, especially across wifi access points and routers.
 
 [Read more about LAN API Requirements here](LAN.md)
 
+## Bluetooth Configuration
+
+Bluetooth control is the preferred transport for lights when it is available. It
+requires the companion **Govee BLE Executor** Home Assistant integration, which
+carries out the Bluetooth work using Home Assistant's own adapters and ESPHome
+proxies. See [the component README](../component/README.md) for why the add-on
+cannot reach the proxies itself.
+
+|CLI|Environment|Add-on Option|Purpose|
+|---|-----------|-------------|-------|
+|`--ble-topic-prefix`|`GOVEE_BLE_TOPIC_PREFIX=gv2mqtt/ble`|`ble_topic_prefix`|MQTT topic prefix shared with the Govee BLE Executor integration. Must match the value configured there. Defaults to `gv2mqtt/ble`.|
+|`--no-ble`|`GOVEE_BLE_DISABLE=true`|`no_ble`|Disable the Bluetooth transport entirely, even when the executor is online.|
+|`--transport-order`|-|-|Override which transports are preferred, as a comma separated list of `ble`, `nightlight`, `lan`, `iot`, `platform`. Acts as a priority prefix: the transports named here are tried first, followed by whatever else the operation allows. It never enables a transport an operation does not support.|
+
+Bluetooth is used only when the executor reports itself online and the device's
+Bluetooth address is known. Addresses come from your Govee account metadata, so
+no manual configuration is needed. If Bluetooth fails repeatedly for a device,
+it is set aside for five minutes and the usual LAN or cloud path is used instead.
+
 ## MQTT Configuration
 
 In order to make your devices appear in Home Assistant, you will need to have configured Home Assistant with an MQTT broker.

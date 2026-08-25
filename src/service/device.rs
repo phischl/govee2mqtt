@@ -497,6 +497,41 @@ impl Device {
             .and_then(|info| info.capability_by_instance(instance))
     }
 
+    /// The device's Bluetooth address, if we can work it out.
+    ///
+    /// Two independent sources, which agree wherever both are present in the
+    /// account data: the metadata states the address outright, and the Govee
+    /// device id turns out to be that same address with two bytes prepended
+    /// (`47:13:CF:00:00:00:00:25` carries `CF:00:00:00:00:25`).
+    pub fn ble_address(&self) -> Option<String> {
+        fn is_mac(candidate: &str) -> bool {
+            let octets: Vec<&str> = candidate.split(':').collect();
+            octets.len() == 6
+                && octets
+                    .iter()
+                    .all(|octet| octet.len() == 2 && octet.chars().all(|c| c.is_ascii_hexdigit()))
+        }
+
+        if let Some(info) = &self.undoc_device_info {
+            if let Some(address) = &info.entry.device_ext.device_settings.address {
+                if is_mac(address) {
+                    return Some(address.to_uppercase());
+                }
+            }
+        }
+
+        let octets: Vec<&str> = self.id.split(':').collect();
+        if octets.len() == 8
+            && octets
+                .iter()
+                .all(|octet| octet.len() == 2 && octet.chars().all(|c| c.is_ascii_hexdigit()))
+        {
+            return Some(octets[2..].join(":").to_uppercase());
+        }
+
+        None
+    }
+
     pub fn get_light_power_toggle_instance_name(&self) -> Option<&'static str> {
         match self.device_type() {
             DeviceType::Light => Some("powerSwitch"),
