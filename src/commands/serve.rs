@@ -127,7 +127,13 @@ async fn poll_via_ble(
     // would bury the log. The circuit breaker escalates for us once a device
     // has failed repeatedly.
     if let Err(err) = scheduler
-        .poll(state, &device.id, &device.sku, &address)
+        .poll(
+            state,
+            &device.id,
+            &device.sku,
+            &address,
+            device.segment_count(),
+        )
         .await
     {
         log::debug!("polling {device} over BLE failed: {err:#}");

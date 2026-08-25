@@ -217,10 +217,14 @@ impl Device {
     ///
     /// Pages are merged rather than replacing the map wholesale, so a device
     /// that reports only some of them still updates the segments it did report.
-    pub fn set_segment_colors(&mut self, pages: &[NotifySegmentColors]) {
+    /// Returns whether this taught us about segments we did not know of, which
+    /// means Home Assistant needs new entities.
+    pub fn set_segment_colors(&mut self, pages: &[NotifySegmentColors]) -> bool {
         if pages.is_empty() {
-            return;
+            return false;
         }
+
+        let known_before = self.segment_count();
 
         let observed = pages
             .iter()
@@ -248,6 +252,8 @@ impl Device {
             }
         }
         self.last_segment_colors_update.replace(Utc::now());
+
+        self.segment_count() > known_before
     }
 
     /// Colour last reported for one segment.

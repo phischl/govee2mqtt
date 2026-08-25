@@ -170,6 +170,28 @@ impl HassClient {
         Ok(())
     }
 
+    /// Publish one device's entity configs.
+    ///
+    /// Entities are normally registered once at startup, but the set can grow
+    /// afterwards: a device's own `aa a5` frames may reveal segments that
+    /// Govee's metadata never mentioned, and for a Bluetooth-only device
+    /// there is no metadata at all. Re-publishing discovery configs is how MQTT
+    /// discovery is meant to handle that — Home Assistant treats a config for
+    /// a known unique id as an update and a new one as a new entity, so this is
+    /// safe to repeat.
+    pub async fn advise_hass_of_device_config(
+        &self,
+        device: &ServiceDevice,
+        state: &StateHandle,
+    ) -> anyhow::Result<()> {
+        let mut entities = EntityList::new();
+        enumerate_entities_for_device(device, state, &mut entities).await?;
+        entities.publish_config(state, self).await?;
+        entities.notify_state(self).await?;
+
+        Ok(())
+    }
+
     pub async fn advise_hass_of_light_state(
         &self,
         device: &ServiceDevice,

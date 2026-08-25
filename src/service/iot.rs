@@ -431,6 +431,7 @@ async fn run_iot_subscriber(
                     Ok(packet) => {
                         log::debug!("{packet:?}");
                         if let Some((sku, device_id)) = packet.sku_and_device() {
+                            let mut segments_discovered = false;
                             {
                                 let mut device = state.device_mut(sku, device_id).await;
                                 let mut state = match device.iot_device_status.clone() {
@@ -532,7 +533,7 @@ async fn run_iot_subscriber(
                                 }
 
                                 if !segment_pages.is_empty() {
-                                    device.set_segment_colors(&segment_pages);
+                                    segments_discovered = device.set_segment_colors(&segment_pages);
                                 }
 
                                 // Check on/off last, as we can synthesize "on"
@@ -541,6 +542,20 @@ async fn run_iot_subscriber(
                                     state.on = on_off != 0;
                                 }
                                 device.set_iot_device_status(state);
+                            }
+
+                            // Outside the block above on purpose: the device
+                            // guard has to be dropped first, because both of
+                            // these re-read the device and would deadlock
+                            // against it.
+                            if segments_discovered {
+                                log::info!(
+                                    "{sku} {device_id} reported segments that Govee's metadata \
+                                     did not; registering them with Home Assistant"
+                                );
+                                if let Err(err) = state.notify_of_entity_change(device_id).await {
+                                    log::error!("registering segments for {device_id}: {err:#}");
+                                }
                             }
                             state.notify_of_state_change(device_id).await?;
                         }

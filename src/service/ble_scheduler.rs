@@ -338,6 +338,28 @@ enum Query {
 impl Query {
     const ALL: [Query; 3] = [Query::Power, Query::Brightness, Query::Color];
 
+    /// However many segments a device turns out to have, one poll never asks
+    /// for more pages than this.
+    const MAX_DISCOVERY_PAGES: u32 = 6;
+
+    /// Segment pages to ask for during a poll, given what we already know.
+    ///
+    /// A device with no segments simply does not answer, so probing page 1
+    /// costs one query and is how a Bluetooth-only device — which the Platform
+    /// API does not describe at all — can ever reveal that it has segments.
+    ///
+    /// Discovery is deliberately *progressive*: each poll reaches one page past
+    /// what is known rather than sweeping blindly. A session is a write plus a
+    /// notify round trip per query, and the count converges in a few polls
+    /// while `Device::segment_count` grows from the replies.
+    fn discover_segments(known: Option<u32>) -> Vec<Query> {
+        let pages_known = known.map_or(0, |count| count.div_ceil(SEGMENTS_PER_PAGE as u32));
+        // One past the end, to find segments we have not seen yet.
+        let want = (pages_known + 1).min(Self::MAX_DISCOVERY_PAGES);
+
+        (1..=want as u8).map(Query::Segments).collect()
+    }
+
     /// The segment pages that would carry these segment indices.
     ///
     /// Asked with the common three-per-page stride: a device that packs four
@@ -629,15 +651,22 @@ impl BleScheduler {
     }
 
     /// Read a device's current state without changing anything.
+    ///
+    /// `known_segments` is what we believe the device has, and drives how far
+    /// the segment discovery reaches — see `Query::discover_segments`.
     pub async fn poll(
         &self,
         state: &StateHandle,
         device_id: &str,
         sku: &str,
         address: &str,
+        known_segments: Option<u32>,
     ) -> anyhow::Result<()> {
+        let mut queries = Query::ALL.to_vec();
+        queries.extend(Query::discover_segments(known_segments));
+
         let result = self
-            .exchange(state, device_id, sku, address, &[], &Query::ALL, "poll")
+            .exchange(state, device_id, sku, address, &[], &queries, "poll")
             .await;
 
         match &result {
@@ -814,12 +843,24 @@ impl BleScheduler {
             }
         }
 
+        let mut segments_discovered = false;
         if !segment_pages.is_empty() {
-            state
+            segments_discovered = state
                 .device_mut(sku, device_id)
                 .await
                 .set_segment_colors(&segment_pages);
             changed = true;
+        }
+
+        // Before the notify below, and outside every guard: a device that has
+        // just told us it has segments needs entities for them, and for a
+        // Bluetooth-only device this is the only place that can ever be
+        // learned — the Platform API does not describe such a device at all.
+        if segments_discovered {
+            log::info!("{sku} {device_id} reported segments; registering them with Home Assistant");
+            if let Err(err) = state.notify_of_entity_change(device_id).await {
+                log::error!("registering segments for {device_id}: {err:#}");
+            }
         }
 
         if !changed {
@@ -925,6 +966,32 @@ mod test {
         // Blue, and a mask naming all four segments.
         assert_eq!(&command[8..14], "0000ff");
         assert_eq!(&command[24..26], "0f");
+    }
+
+    /// A device with no segments simply does not answer, so probing one page
+    /// is what lets a Bluetooth-only device — which the Platform API does not
+    /// describe at all — reveal that it has any.
+    #[test]
+    fn segment_discovery_reaches_one_page_past_what_is_known() {
+        assert_eq!(Query::discover_segments(None), vec![Query::Segments(1)]);
+
+        // Three known segments fill page 1, so look at page 2 as well.
+        assert_eq!(
+            Query::discover_segments(Some(3)),
+            vec![Query::Segments(1), Query::Segments(2)]
+        );
+
+        // Eight need three pages, so reach for a fourth.
+        assert_eq!(Query::discover_segments(Some(8)).len(), 4);
+    }
+
+    /// However many a device turns out to have, one poll stays bounded.
+    #[test]
+    fn segment_discovery_does_not_grow_without_limit() {
+        assert_eq!(
+            Query::discover_segments(Some(300)).len(),
+            Query::MAX_DISCOVERY_PAGES as usize
+        );
     }
 
     /// A scene touching a few segments must not turn into a long radio

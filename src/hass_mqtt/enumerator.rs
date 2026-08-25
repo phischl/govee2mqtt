@@ -208,12 +208,19 @@ pub async fn enumerate_entities_for_device(
                 }
             }
         }
+    }
 
-        if let Some(segments) = info.supports_segmented_rgb() {
-            for n in segments {
-                entities.add(DeviceLight::for_device(d, state, Some(n)).await?);
-            }
+    // Deliberately outside the `http_device_info` block above: the count comes
+    // from `Device::segment_count`, which prefers what the device itself
+    // reported over `aa a5` to what Govee's metadata claims. An H6054 has
+    // twelve segments that the Platform API does not describe at all, and a
+    // Bluetooth-only device has no Platform data whatsoever — neither would
+    // ever get a segment entity from the capability alone.
+    if let Some(count) = d.segment_count() {
+        for n in 0..count {
+            entities.add(DeviceLight::for_device(d, state, Some(n)).await?);
         }
     }
+
     Ok(())
 }

@@ -561,6 +561,23 @@ impl State {
 
     // Take care not to call this while you hold a mutable device
     // reference, as that will deadlock!
+    /// Re-publish a device's entity configs, for when its entity set has grown.
+    ///
+    /// Never call this while holding a `device_mut` guard: it re-reads the
+    /// device and would deadlock against it, exactly as
+    /// `notify_of_state_change` would.
+    pub async fn notify_of_entity_change(self: &Arc<Self>, device_id: &str) -> anyhow::Result<()> {
+        let Some(device) = self.device_by_id(device_id).await else {
+            anyhow::bail!("cannot find device {device_id}!?");
+        };
+
+        if let Some(hass) = self.get_hass_client().await {
+            hass.advise_hass_of_device_config(&device, self).await?;
+        }
+
+        Ok(())
+    }
+
     pub async fn notify_of_state_change(self: &Arc<Self>, device_id: &str) -> anyhow::Result<()> {
         let Some(canonical_device) = self.device_by_id(device_id).await else {
             anyhow::bail!("cannot find device {device_id}!?");
