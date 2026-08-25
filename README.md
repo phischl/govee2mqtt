@@ -79,17 +79,19 @@ second add-on, so it installs through HACS and not through the Add-on Store.
 * [Is my device supported?](docs/SKUS.md)
 * [Check out the FAQ](docs/FAQ.md)
 
-## Supporting the original author
+## Want to say thanks?
 
-Almost everything here was written by Wez Furlong, and this fork adds one transport on
-top of it. If you find it useful, the thanks belong upstream:
+Almost everything here was written by Wez Furlong; this fork adds the Bluetooth
+transport on top of it. So the first thanks belong upstream:
 
 * [Sponsor Wez on Github](https://github.com/sponsors/wez)
 * [Sponsor Wez on Patreon](https://patreon.com/WezFurlong)
 * [Sponsor Wez on Ko-Fi](https://ko-fi.com/wezfurlong)
 * [Sponsor Wez via liberapay](https://liberapay.com/wez)
 
-This fork asks for nothing.
+If the Bluetooth support in particular is what you came for, you can buy me a coffee:
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/phizzl)
 
 ## Credits
 
