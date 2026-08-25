@@ -1,0 +1,20 @@
+# Tooling config for the companion component. It is not a distributable package;
+# Home Assistant loads it from custom_components/.
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "SIM", "UP", "RUF", "PL", "C4", "PIE", "RET", "BLE"]
+ignore = [
+    # Home Assistant fixes these signatures; unused parameters are not ours to drop.
+    "ARG001",
+    "ARG004",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["PLR2004"]  # literal expectations are the point of a test
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

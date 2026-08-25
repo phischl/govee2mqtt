@@ -1,0 +1,14 @@
+{
+  "domain": "govee_ble_executor",
+  "name": "Govee BLE Executor",
+  "version": "2026.8.0",
+  "config_flow": true,
+  "integration_type": "hub",
+  "iot_class": "local_push",
+  "documentation": "https://github.com/phischl/govee2mqtt/blob/main/component/README.md",
+  "issue_tracker": "https://github.com/phischl/govee2mqtt/issues",
+  "codeowners": ["@phischl"],
+  "dependencies": ["bluetooth_adapters", "mqtt"],
+  "requirements": [],
+  "loggers": ["govee_ble_executor"]
+}

@@ -1,0 +1,40 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Govee BLE Executor",
+        "description": "Executes Bluetooth operations on behalf of the govee2mqtt add-on. The defaults are deliberately conservative: one connection at a time keeps the add-on from competing with your other Bluetooth devices for proxy connection slots.",
+        "data": {
+          "topic_prefix": "MQTT topic prefix",
+          "max_concurrent": "Concurrent connections",
+          "idle_timeout": "Idle timeout"
+        },
+        "data_description": {
+          "topic_prefix": "Must match the add-on's setting.",
+          "max_concurrent": "How many devices may be talked to at once. Raise this only if commands feel sluggish and your proxies have slots to spare.",
+          "idle_timeout": "How long a connection is kept open after the last command, so that a burst of commands reuses it."
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Govee BLE Executor is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Govee BLE Executor",
+        "data": {
+          "topic_prefix": "MQTT topic prefix",
+          "max_concurrent": "Concurrent connections",
+          "idle_timeout": "Idle timeout"
+        },
+        "data_description": {
+          "topic_prefix": "Must match the add-on's setting.",
+          "max_concurrent": "How many devices may be talked to at once. Raise this only if commands feel sluggish and your proxies have slots to spare.",
+          "idle_timeout": "How long a connection is kept open after the last command, so that a burst of commands reuses it."
+        }
+      }
+    }
+  }
+}
