@@ -1,0 +1,80 @@
+name: Security
+
+# Trivy scans, reported into the repository's Security tab rather than failing
+# the build. A CVE in a transitive dependency is worth knowing about, but it is
+# usually not a reason to block a change that has nothing to do with it --
+# raise the exit-code below if that trade ever stops making sense.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "**/Cargo.*"
+      - "Dockerfile"
+      - "addon/Dockerfile"
+      - ".github/workflows/security.yml"
+  pull_request:
+    branches:
+      - main
+  schedule:
+    # Weekly, so a CVE published against an unchanged dependency still surfaces.
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repository:
+    name: Dependencies and secrets
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Scan the working tree
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scanners: vuln,secret,misconfig
+          format: sarif
+          output: trivy-fs.sarif
+          # Report, do not block; see the note at the top of this file.
+          exit-code: "0"
+
+      - name: Upload to code scanning
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+
+  image:
+    name: Published image
+    # Needs an image to scan, so it is pointless on a pull request from a fork
+    # and on a branch that has not been published.
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Scan ghcr.io/${{ github.repository_owner }}/govee2mqtt:latest
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: ghcr.io/${{ github.repository_owner }}/govee2mqtt:latest
+          format: sarif
+          output: trivy-image.sarif
+          exit-code: "0"
+
+      - name: Upload to code scanning
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image

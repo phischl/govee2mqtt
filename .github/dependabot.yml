@@ -20,3 +20,13 @@ updates:
       interval: "weekly"
     cooldown:
       default-days: 7
+
+  # Only the base images in the root Dockerfile are actually managed here:
+  # addon/Dockerfile pulls this fork's own :latest and a $BUILD_FROM the Home
+  # Assistant builder supplies.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
