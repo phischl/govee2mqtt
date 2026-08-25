@@ -29,10 +29,13 @@ from .protocol import DelayOp, ErrorKind, JobRequest, Op, QueryOp, WriteOp, noti
 
 _LOGGER = logging.getLogger(__name__)
 
-# bleak allows 20s per connect attempt, and the executor runs a small worker
-# pool, so a device that is visible but unreachable would otherwise hold the
-# queue for a minute or more. Two attempts is the most a job's budget affords.
 MAX_CONNECT_ATTEMPTS: Final = 2
+
+# bleak's own default is 20s per attempt, which does not fit a job's budget
+# twice over: the first attempt would consume it almost entirely and the second
+# would be cut off part way, wasting the time without ever getting a fair try.
+# A proxy-backed connect that is going to succeed does so in a few seconds.
+CONNECT_TIMEOUT: Final = 12.0
 
 
 class SessionError(Exception):
@@ -175,6 +178,8 @@ class BleSession:
                     f"{self._address} has not been seen by a connectable scanner. {hint}".strip(),
                 )
 
+            self._log_signal()
+
             try:
                 self._client = await establish_connection(
                     BleakClientWithServiceCache,
@@ -183,6 +188,7 @@ class BleSession:
                     self._on_disconnected,
                     max_attempts=MAX_CONNECT_ATTEMPTS,
                     use_services_cache=True,
+                    timeout=CONNECT_TIMEOUT,
                 )
             except BleakOutOfConnectionSlotsError as err:
                 raise SessionError(
@@ -200,6 +206,29 @@ class BleSession:
 
             self._expected_disconnect = False
             _LOGGER.debug("[%s] connected", self._address)
+
+    def _log_signal(self) -> None:
+        """Note how well we can hear the device before trying to talk to it.
+
+        A connect that times out looks identical whether the device is barely in
+        range or simply refusing, and the signal level is what tells them apart.
+        """
+        try:
+            info = bluetooth.async_last_service_info(self._hass, self._address, connectable=True)
+        except Exception as err:  # noqa: BLE001 - diagnostics must never break a job
+            _LOGGER.debug("[%s] no service info available: %s", self._address, err)
+            return
+
+        if info is None:
+            _LOGGER.debug("[%s] no advertisement on record", self._address)
+        else:
+            _LOGGER.debug(
+                "[%s] rssi %s dBm via %s, last seen %s",
+                self._address,
+                info.rssi,
+                info.source,
+                info.time,
+            )
 
     def _on_disconnected(self, _client: BleakClientWithServiceCache) -> None:
         if self._expected_disconnect:
