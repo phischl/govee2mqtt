@@ -29,13 +29,17 @@ from .protocol import DelayOp, ErrorKind, JobRequest, Op, QueryOp, WriteOp, noti
 
 _LOGGER = logging.getLogger(__name__)
 
-MAX_CONNECT_ATTEMPTS: Final = 2
-
-# bleak's own default is 20s per attempt, which does not fit a job's budget
-# twice over: the first attempt would consume it almost entirely and the second
-# would be cut off part way, wasting the time without ever getting a fair try.
-# A proxy-backed connect that is going to succeed does so in a few seconds.
-CONNECT_TIMEOUT: Final = 12.0
+# One attempt, deliberately.
+#
+# bleak-retry-connector allows 20s per attempt and enforces that itself; passing
+# a shorter `timeout` to establish_connection was measured to have no effect. A
+# second attempt therefore cannot fit inside a job's budget — it would start,
+# get cut off part way, and waste the time without ever getting a fair try.
+#
+# Retry policy belongs to the add-on's scheduler in any case: it owns the
+# backoff and the circuit breaker, and it is the only side that knows whether
+# another transport could serve the command instead.
+MAX_CONNECT_ATTEMPTS: Final = 1
 
 
 class SessionError(Exception):
@@ -178,7 +182,9 @@ class BleSession:
                     f"{self._address} has not been seen by a connectable scanner. {hint}".strip(),
                 )
 
-            self._log_signal()
+            signal = self._signal_note()
+            if signal:
+                _LOGGER.debug("[%s] %s", self._address, signal)
 
             try:
                 self._client = await establish_connection(
@@ -188,7 +194,6 @@ class BleSession:
                     self._on_disconnected,
                     max_attempts=MAX_CONNECT_ATTEMPTS,
                     use_services_cache=True,
-                    timeout=CONNECT_TIMEOUT,
                 )
             except BleakOutOfConnectionSlotsError as err:
                 raise SessionError(
@@ -202,33 +207,31 @@ class BleSession:
                     f"{err}. {_reachability_hint(self._hass, self._address)}".strip(),
                 ) from err
             except (BleakConnectionError, BleakError, TimeoutError) as err:
-                raise SessionError(ErrorKind.CONNECT_FAILED, str(err)) from err
+                raise SessionError(
+                    ErrorKind.CONNECT_FAILED,
+                    f"{err or type(err).__name__}. {self._signal_note()}".strip(),
+                ) from err
 
             self._expected_disconnect = False
             _LOGGER.debug("[%s] connected", self._address)
 
-    def _log_signal(self) -> None:
-        """Note how well we can hear the device before trying to talk to it.
+    def _signal_note(self) -> str:
+        """How well we can hear the device, as a phrase to append to an error.
 
         A connect that times out looks identical whether the device is barely in
         range or simply refusing, and the signal level is what tells them apart.
+        Worth putting in the error itself rather than only in a debug log, since
+        that is where someone will be looking.
         """
         try:
             info = bluetooth.async_last_service_info(self._hass, self._address, connectable=True)
         except Exception as err:  # noqa: BLE001 - diagnostics must never break a job
             _LOGGER.debug("[%s] no service info available: %s", self._address, err)
-            return
+            return ""
 
         if info is None:
-            _LOGGER.debug("[%s] no advertisement on record", self._address)
-        else:
-            _LOGGER.debug(
-                "[%s] rssi %s dBm via %s, last seen %s",
-                self._address,
-                info.rssi,
-                info.source,
-                info.time,
-            )
+            return "no advertisement on record"
+        return f"rssi {info.rssi} dBm via {info.source}"
 
     def _on_disconnected(self, _client: BleakClientWithServiceCache) -> None:
         if self._expected_disconnect:
