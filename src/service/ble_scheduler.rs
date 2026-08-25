@@ -690,6 +690,19 @@ mod test {
     }
 
     #[test]
+    fn a_power_only_batch_is_a_single_frame() {
+        // What a segmented device gets: power and nothing else.
+        let mut pending = PendingOps::default();
+        pending.merge(&DeviceOp::LightPowerOn(true)).unwrap();
+
+        assert_eq!(
+            frames_hex(&pending),
+            vec!["3301010000000000000000000000000000000033"]
+        );
+        assert_eq!(pending.verification_queries(), vec![Query::Power]);
+    }
+
+    #[test]
     fn setting_brightness_also_switches_the_light_on() {
         // Home Assistant sends "turn on at 60%" as brightness alone, trusting
         // the transport to power the device on. Over BLE that has to be said.

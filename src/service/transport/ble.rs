@@ -16,7 +16,14 @@ pub struct BleTransport;
 
 impl BleTransport {
     /// The operations we have verified frame encodings for.
-    fn handles(op: &DeviceOp) -> bool {
+    fn handles(device: &Device, op: &DeviceOp) -> bool {
+        if device.is_segmented() {
+            // Power is the only thing a segmented device honours from the
+            // generic light command set; see Device::is_segmented. Declining
+            // the rest sends it to the cloud instead of silently doing nothing.
+            return matches!(op, DeviceOp::PowerOn(_) | DeviceOp::LightPowerOn(_));
+        }
+
         matches!(
             op,
             DeviceOp::PowerOn(_)
@@ -73,7 +80,7 @@ impl Transport for BleTransport {
         device: &Device,
         op: &DeviceOp,
     ) -> anyhow::Result<Handled> {
-        if !Self::handles(op) {
+        if !Self::handles(device, op) {
             return Ok(Handled::NotSupported);
         }
 
@@ -94,7 +101,7 @@ impl Transport for BleTransport {
         device: &Device,
         ops: &[DeviceOp],
     ) -> anyhow::Result<Handled> {
-        if ops.iter().any(|op| !Self::handles(op)) {
+        if ops.iter().any(|op| !Self::handles(device, op)) {
             // Partially serving a batch would leave the light half configured
             // and the rest of it applied by a different transport.
             return Ok(Handled::NotSupported);

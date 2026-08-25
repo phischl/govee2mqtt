@@ -660,6 +660,24 @@ impl Device {
         false
     }
 
+    /// Whether this device is addressed as a set of segments.
+    ///
+    /// Segmented devices accept the whole-device power frame but ignore the
+    /// whole-strip colour command: an H613D switched on over Bluetooth and kept
+    /// the colour it already had. Segment control has never been
+    /// reverse-engineered, so anything beyond power would report success while
+    /// doing nothing.
+    ///
+    /// Detected from the Platform capability rather than an SKU list. Note the
+    /// gap that leaves: a Bluetooth-only segmented device has no Platform data
+    /// to read this from, and will still be offered colour it cannot apply.
+    pub fn is_segmented(&self) -> bool {
+        self.http_device_info
+            .as_ref()
+            .and_then(|info| info.supports_segmented_rgb())
+            .is_some()
+    }
+
     /// Whether this device is a light we can only reach over Bluetooth.
     ///
     /// Such a device has no Platform capabilities to read and no LAN presence to
