@@ -179,7 +179,7 @@ impl PendingOps {
         }
 
         let mut queries = vec![];
-        if self.power.is_some() {
+        if self.power.is_some() || self.powers_on_implicitly() {
             queries.push(Query::Power);
         }
         if self.brightness.is_some() {
@@ -189,6 +189,21 @@ impl PendingOps {
             queries.push(Query::Color);
         }
         queries
+    }
+
+    /// Whether this change implies switching the device on.
+    ///
+    /// Home Assistant treats "turn on at 60%" as one action, and upstream's
+    /// command handler leans on that: when brightness or colour is present it
+    /// sends no power command at all, because the cloud and LAN APIs power a
+    /// device on as a side effect of setting either one.
+    ///
+    /// The BLE frames have no such side effect. `33 04 <percent>` sets the
+    /// brightness and nothing more, so without this the light stays dark and
+    /// quietly remembers how bright it would have been.
+    fn powers_on_implicitly(&self) -> bool {
+        self.power.is_none()
+            && (self.brightness.is_some() || self.color.is_some() || self.kelvin.is_some())
     }
 
     /// Render to wire frames, in the order the device expects them.
@@ -201,6 +216,8 @@ impl PendingOps {
                 // Nothing else is worth sending to a device we just switched off.
                 return Ok(frames);
             }
+        } else if self.powers_on_implicitly() {
+            frames.push(encode(&SetDevicePower { on: true })?);
         }
 
         if let Some(percent) = self.brightness {
@@ -666,13 +683,59 @@ mod test {
     }
 
     #[test]
+    fn setting_brightness_also_switches_the_light_on() {
+        // Home Assistant sends "turn on at 60%" as brightness alone, trusting
+        // the transport to power the device on. Over BLE that has to be said.
+        let mut pending = PendingOps::default();
+        pending.merge(&DeviceOp::SetBrightness(60)).unwrap();
+
+        assert_eq!(
+            frames_hex(&pending),
+            vec![
+                "3301010000000000000000000000000000000033",
+                "33043c000000000000000000000000000000000b",
+            ]
+        );
+        assert!(pending.verification_queries().contains(&Query::Power));
+    }
+
+    #[test]
+    fn an_explicit_power_state_is_not_second_guessed() {
+        let mut pending = PendingOps::default();
+        pending.merge(&DeviceOp::PowerOn(false)).unwrap();
+        pending.merge(&DeviceOp::SetBrightness(60)).unwrap();
+
+        // Switching off wins; we do not helpfully switch it back on.
+        assert_eq!(
+            frames_hex(&pending),
+            vec!["3301000000000000000000000000000000000032"]
+        );
+    }
+
+    #[test]
+    fn powering_on_explicitly_does_not_duplicate_the_frame() {
+        let mut pending = PendingOps::default();
+        pending.merge(&DeviceOp::LightPowerOn(true)).unwrap();
+        pending.merge(&DeviceOp::SetBrightness(60)).unwrap();
+
+        assert_eq!(frames_hex(&pending).len(), 2);
+    }
+
+    #[test]
     fn the_last_value_for_an_attribute_wins() {
         let mut pending = PendingOps::default();
         pending.merge(&DeviceOp::SetBrightness(10)).unwrap();
         pending.merge(&DeviceOp::SetBrightness(90)).unwrap();
 
         assert_eq!(pending.brightness, Some(90));
-        assert_eq!(frames_hex(&pending).len(), 1);
+        // Two frames: the implied power-on, then the brightness itself.
+        assert_eq!(
+            frames_hex(&pending),
+            vec![
+                "3301010000000000000000000000000000000033",
+                "33045a000000000000000000000000000000006d"
+            ]
+        );
     }
 
     #[test]
@@ -686,7 +749,10 @@ mod test {
         assert_eq!(pending.kelvin, None);
         assert_eq!(
             frames_hex(&pending),
-            vec!["33050d010203000000000000000000000000003b"]
+            vec![
+                "3301010000000000000000000000000000000033",
+                "33050d010203000000000000000000000000003b"
+            ]
         );
     }
 
@@ -712,7 +778,10 @@ mod test {
 
         assert_eq!(
             frames_hex(&pending),
-            vec!["3304010000000000000000000000000000000036"]
+            vec![
+                "3301010000000000000000000000000000000033",
+                "3304010000000000000000000000000000000036"
+            ]
         );
     }
 
@@ -729,7 +798,12 @@ mod test {
         let mut pending = PendingOps::default();
         pending.merge(&DeviceOp::SetBrightness(50)).unwrap();
 
-        assert_eq!(pending.verification_queries(), vec![Query::Brightness]);
+        // Power comes along because setting brightness implies switching on;
+        // colour is still left alone, which is the point of the exercise.
+        assert_eq!(
+            pending.verification_queries(),
+            vec![Query::Power, Query::Brightness]
+        );
     }
 
     #[test]
