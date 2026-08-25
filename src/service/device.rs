@@ -778,28 +778,49 @@ impl Device {
             .is_some_and(|info| info.entry.device_ext.device_settings.topic.is_some())
     }
 
-    /// How many segments this device has, when we can tell.
+    /// How far a segment command may address, when this device has segments.
     ///
-    /// Prefers what the device itself reported over `aa a5`, because Govee's
-    /// metadata is unreliable about the count in both directions — it claims
-    /// fifteen for a two-spot H7093 and thirty for a fifteen-bulb H7020, and
-    /// offers none at all for a twelve-segment H6054 (§17).
+    /// The **larger** of what the device reported and what Govee claims,
+    /// because for addressing the two errors are not symmetric: mask bits past
+    /// the end reach nothing, while a count that is too small would leave
+    /// segments untouched.
     ///
-    /// Over-reporting is harmless for addressing: mask bits past the end reach
-    /// nothing. Under-reporting would leave segments untouched, which is why
-    /// the larger of the two wins.
+    /// This is not the number to show a user — see `visible_segment_count`.
     pub fn segment_count(&self) -> Option<u32> {
-        let reported = self.segment_colors.keys().max().map(|highest| highest + 1);
-        let claimed = self
-            .http_device_info
-            .as_ref()
-            .and_then(|info| info.supports_segmented_rgb())
-            .map(|range| range.end);
-
-        match (reported, claimed) {
+        match (self.reported_segment_count(), self.claimed_segment_count()) {
             (Some(a), Some(b)) => Some(a.max(b)),
             (only, None) | (None, only) => only,
         }
+    }
+
+    /// How many segments to give Home Assistant entities for.
+    ///
+    /// Here the errors *are* asymmetric the other way: an entity too many is a
+    /// control that does nothing, which is worse than one missing, and Govee
+    /// over-claims badly — fifteen for a two-spot H7093 (§17). So this believes
+    /// the device once it has spoken, and falls back to the metadata only
+    /// before then.
+    ///
+    /// It does not fix every case. An H7020 reports thirty slots because a
+    /// second string of lights can be chained to it, and reports them whether
+    /// or not one is plugged in; nothing in the frames distinguishes the two.
+    pub fn visible_segment_count(&self) -> Option<u32> {
+        self.reported_segment_count()
+            .or_else(|| self.claimed_segment_count())
+    }
+
+    /// Segments the device itself has told us about, over `aa a5`.
+    fn reported_segment_count(&self) -> Option<u32> {
+        self.segment_colors.keys().max().map(|highest| highest + 1)
+    }
+
+    /// Segments Govee's metadata claims. Unreliable in both directions: it
+    /// offers none at all for a twelve-segment H6054.
+    fn claimed_segment_count(&self) -> Option<u32> {
+        self.http_device_info
+            .as_ref()
+            .and_then(|info| info.supports_segmented_rgb())
+            .map(|range| range.end)
     }
 
     /// Whether this device is addressed as a set of segments.
@@ -1049,6 +1070,24 @@ mod test {
             let c = device.segment_color(n).expect("a blue segment");
             assert_eq!((c.r, c.g, c.b), (0x00, 0x00, 0xff), "segment {n}");
         }
+    }
+
+    /// The two counts answer different questions and the errors point opposite
+    /// ways: addressing past the end is harmless, an entity past the end is a
+    /// control that does nothing. An H7093 makes the difference concrete —
+    /// Govee claims fifteen segments for two garden spots.
+    #[test]
+    fn addressing_is_generous_where_entities_are_not() {
+        let mut device = Device::new("H7093", "1F:54:DD:6E:05:C6:49:83");
+
+        // Before the device has said anything, the metadata is all we have.
+        assert_eq!(device.reported_segment_count(), None);
+
+        device.set_segment_colors(&[segment_page("aaa501328a00ff320000ff000000000000000084")]);
+
+        // Two spots is what the device reports, and what the user should see.
+        assert_eq!(device.visible_segment_count(), Some(2));
+        assert_eq!(device.segment_count(), Some(2));
     }
 
     /// An H7093 with two garden spots sends a single page and pads the rest.

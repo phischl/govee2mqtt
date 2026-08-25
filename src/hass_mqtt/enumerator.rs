@@ -211,12 +211,12 @@ pub async fn enumerate_entities_for_device(
     }
 
     // Deliberately outside the `http_device_info` block above: the count comes
-    // from `Device::segment_count`, which prefers what the device itself
-    // reported over `aa a5` to what Govee's metadata claims. An H6054 has
+    // from `Device::visible_segment_count`, which believes the device over
+    // Govee's metadata once it has spoken. An H6054 has
     // twelve segments that the Platform API does not describe at all, and a
     // Bluetooth-only device has no Platform data whatsoever — neither would
     // ever get a segment entity from the capability alone.
-    if let Some(count) = d.segment_count() {
+    if let Some(count) = d.visible_segment_count() {
         for n in 0..count {
             entities.add(DeviceLight::for_device(d, state, Some(n)).await?);
         }
