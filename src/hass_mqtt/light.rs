@@ -187,16 +187,11 @@ impl DeviceLight {
             (None, None)
         };
 
-        let brightness = segment.is_some()
-            || quirk
-                .as_ref()
-                .map(|q| q.supports_brightness)
-                .unwrap_or(false)
-            || device
-                .http_device_info
-                .as_ref()
-                .map(|info| info.supports_brightness())
-                .unwrap_or(false);
+        // Deliberately the accessor rather than a local copy of its logic. The
+        // duplicate here left out the LAN branch that supports_rgb() just above
+        // relies on, so a LAN-only or Bluetooth-only light came out without a
+        // brightness slider while happily offering colour.
+        let brightness = segment.is_some() || device.supports_brightness();
 
         let name = match segment {
             Some(n) => Some(format!("Segment {:03}", n + 1)),

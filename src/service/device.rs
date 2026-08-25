@@ -623,6 +623,10 @@ impl Device {
             return Some((2000, 9000));
         }
 
+        if self.is_ble_only_light() {
+            return Some((2000, 9000));
+        }
+
         self.http_device_info
             .as_ref()
             .and_then(|info| info.get_color_temperature_range())
@@ -635,6 +639,10 @@ impl Device {
 
         if self.lan_device.is_some() {
             // LAN API support suggests that it is a light
+            return true;
+        }
+
+        if self.is_ble_only_light() {
             return true;
         }
 
@@ -652,6 +660,19 @@ impl Device {
         false
     }
 
+    /// Whether this device is a light we can only reach over Bluetooth.
+    ///
+    /// Such a device has no Platform capabilities to read and no LAN presence to
+    /// infer from, so the usual capability questions all answer "no" and it ends
+    /// up in Home Assistant without a light entity. But the `Generic:Light`
+    /// command set applies to every Govee light, so what we can do is known
+    /// regardless of what Govee's metadata says.
+    pub fn is_ble_only_light(&self) -> bool {
+        matches!(self.is_ble_only_device(), Some(true))
+            && matches!(self.device_type(), DeviceType::Light)
+            && self.ble_address().is_some()
+    }
+
     pub fn supports_rgb(&self) -> bool {
         if let Some(quirk) = self.resolve_quirk() {
             return quirk.supports_rgb;
@@ -659,6 +680,10 @@ impl Device {
 
         if self.lan_device.is_some() {
             // LAN API support suggests that it is a light
+            return true;
+        }
+
+        if self.is_ble_only_light() {
             return true;
         }
 
@@ -755,6 +780,67 @@ mod test {
         let status = device.ble_device_status.as_ref().unwrap();
         assert_eq!(status.brightness, 42);
         assert!(status.on);
+    }
+
+    /// A real account entry with the Wi-Fi name cleared. That absence is exactly
+    /// what marks a device as Bluetooth-only, so this is the shape the heuristic
+    /// actually sees.
+    fn undoc_entry_without_wifi() -> crate::undoc_api::DeviceEntry {
+        let response: crate::undoc_api::DevicesResponse =
+            crate::platform_api::from_json(include_str!("../../test-data/undoc-device-list.json"))
+                .unwrap();
+        let mut entry = response.devices[0].clone();
+        entry.device_ext.device_settings.wifi_name = None;
+        entry
+    }
+
+    /// A Bluetooth-only light has no Platform capabilities and no LAN presence,
+    /// so without this it lands in Home Assistant as a diagnostic sensor with no
+    /// way to switch it on.
+    #[test]
+    fn a_ble_only_light_reports_the_generic_light_capabilities() {
+        let mut device = Device::new("H6116", "7E:16:A4:C1:38:14:E6:5A");
+        device.undoc_device_info.replace(UndocDeviceInfo {
+            room_name: None,
+            entry: undoc_entry_without_wifi(),
+        });
+
+        assert_eq!(device.is_ble_only_device(), Some(true));
+        assert!(device.is_ble_only_light());
+        assert!(device.supports_rgb());
+        assert!(device.supports_brightness());
+        assert_eq!(device.get_color_temperature_range(), Some((2000, 9000)));
+    }
+
+    #[test]
+    fn the_metadata_address_wins_over_the_derived_one() {
+        // The account states the address outright; deriving it from the device
+        // id is only the fallback.
+        let mut device = Device::new("H6116", "7E:16:A4:C1:38:14:E6:5A");
+        device.undoc_device_info.replace(UndocDeviceInfo {
+            room_name: None,
+            entry: undoc_entry_without_wifi(),
+        });
+
+        assert_eq!(device.ble_address().as_deref(), Some("CF:00:00:00:00:25"));
+    }
+
+    #[test]
+    fn a_device_without_a_ble_address_stays_uncontrollable() {
+        // No address means nothing to connect to, so exposing it would only
+        // produce an entity that can never work.
+        let mut entry = undoc_entry_without_wifi();
+        entry.device_ext.device_settings.address = None;
+
+        let mut device = Device::new("H6116", "not-a-mac");
+        device.undoc_device_info.replace(UndocDeviceInfo {
+            room_name: None,
+            entry,
+        });
+
+        assert_eq!(device.ble_address(), None);
+        assert!(!device.is_ble_only_light());
+        assert!(!device.is_controllable());
     }
 
     #[test]
