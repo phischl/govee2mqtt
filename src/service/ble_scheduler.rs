@@ -333,13 +333,18 @@ impl BleScheduler {
             .is_some_and(|breaker| breaker.is_open(Instant::now()))
     }
 
-    /// Queue an operation and wait until its session completes.
+    /// Queue one or more operations and wait until their session completes.
+    ///
+    /// Everything handed over in one call lands in the same session, which is
+    /// what turns "on, 60%, warm white" into a single connection carrying three
+    /// frames. The coalescing window on top of that catches commands that
+    /// arrive separately but close together.
     pub async fn apply(
         self: &Arc<Self>,
         state: &StateHandle,
         device: &Device,
         address: &str,
-        op: &DeviceOp,
+        ops: &[DeviceOp],
     ) -> anyhow::Result<()> {
         let (tx, rx) = oneshot::channel();
         let device_id = device.id.to_string();
@@ -348,7 +353,9 @@ impl BleScheduler {
             let mut devices = self.devices.lock().await;
             let queue = devices.entry(device_id.clone()).or_default();
             queue.address = address.to_string();
-            queue.pending.merge(op)?;
+            for op in ops {
+                queue.pending.merge(op)?;
+            }
             queue.waiters.push(tx);
 
             if !queue.flush_scheduled {

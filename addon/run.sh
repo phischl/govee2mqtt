@@ -95,6 +95,10 @@ if bashio::config.has_value ble_exclude ; then
   export GOVEE_BLE_EXCLUDE="$(bashio::config ble_exclude)"
 fi
 
+if bashio::config.has_value ble_max_concurrent ; then
+  export GOVEE_BLE_MAX_CONCURRENT="$(bashio::config ble_max_concurrent)"
+fi
+
 if bashio::config.has_value temperature_scale ; then
   export GOVEE_TEMPERATURE_SCALE="$(bashio::config temperature_scale)"
 fi

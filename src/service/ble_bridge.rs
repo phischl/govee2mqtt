@@ -32,6 +32,13 @@ pub struct BleArguments {
     #[arg(long, global = true)]
     no_ble: bool,
 
+    /// How many Bluetooth sessions may run at once, across all devices.
+    /// One is the safest default; raising it speeds up scenes that touch
+    /// several lights, at the cost of holding more proxy connection slots.
+    /// You may also set this via the GOVEE_BLE_MAX_CONCURRENT environment variable.
+    #[arg(long, global = true)]
+    ble_max_concurrent: Option<usize>,
+
     /// Keep individual devices off Bluetooth while leaving it enabled for
     /// everything else. Comma separated; each entry matches a device id, SKU or
     /// name, so `H601B` excludes a whole model and
@@ -47,6 +54,13 @@ impl BleArguments {
             Some(prefix) => prefix.clone(),
             None => crate::opt_env_var("GOVEE_BLE_TOPIC_PREFIX")?
                 .unwrap_or_else(|| DEFAULT_TOPIC_PREFIX.to_string()),
+        })
+    }
+
+    pub fn max_concurrent(&self) -> anyhow::Result<Option<usize>> {
+        Ok(match self.ble_max_concurrent {
+            Some(value) => Some(value),
+            None => crate::opt_env_var::<usize>("GOVEE_BLE_MAX_CONCURRENT")?,
         })
     }
 

@@ -46,3 +46,4 @@ schema:
   ble_topic_prefix: "str?"
   no_ble: "bool?"
   ble_exclude: "str?"
+  ble_max_concurrent: "int?"

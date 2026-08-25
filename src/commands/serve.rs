@@ -464,14 +464,20 @@ impl ServeCommand {
                 .unwrap_or_default();
             report_ble_exclusions(&state, &exclusions).await;
 
+            let mut config = BleSchedulerConfig {
+                exclusions,
+                ..BleSchedulerConfig::default()
+            };
+            if let Some(max_concurrent) = args.ble_args.max_concurrent()? {
+                config.max_concurrent = max_concurrent.max(1);
+                log::info!(
+                    "Allowing {} concurrent BLE session(s)",
+                    config.max_concurrent
+                );
+            }
+
             state
-                .set_ble_scheduler(Arc::new(BleScheduler::new(
-                    bridge,
-                    BleSchedulerConfig {
-                        exclusions,
-                        ..BleSchedulerConfig::default()
-                    },
-                )))
+                .set_ble_scheduler(Arc::new(BleScheduler::new(bridge, config)))
                 .await;
         }
 

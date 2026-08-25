@@ -10,6 +10,7 @@ use crate::platform_api::{from_json, DeviceType};
 use crate::service::ble_bridge::{BridgeStatus, JobResponse};
 use crate::service::device::Device as ServiceDevice;
 use crate::service::state::StateHandle;
+use crate::service::transport::DeviceOp;
 use crate::temperature::TemperatureScale;
 use anyhow::Context;
 use async_channel::Receiver;
@@ -286,42 +287,48 @@ async fn mqtt_light_command(
                 .context("mqtt_light_command: state.device_set_brightness")?;
         }
     } else {
+        // Collected rather than applied one at a time, so that a transport
+        // which can carry them together does. Over Bluetooth this is the
+        // difference between one radio session and three.
+        let mut ops = vec![];
         let mut power_on = true;
 
         if let Some(brightness) = command.brightness {
-            state
-                .device_set_brightness(&device, brightness)
-                .await
-                .context("mqtt_light_command: state.device_set_brightness")?;
+            ops.push(DeviceOp::SetBrightness(brightness));
             power_on = false;
         }
 
         if let Some(effect) = &command.effect {
+            // Brightness, set above, is fine to keep; the remaining colour
+            // properties make no sense alongside a scene, so they are ignored.
+            state
+                .execute_ops(&device, &ops)
+                .await
+                .context("mqtt_light_command: state.execute_ops")?;
             state
                 .device_set_scene(&device, effect)
                 .await
                 .context("mqtt_light_command: state.device_set_scene")?;
-            // It doesn't make sense to vary color properties
-            // at the same time as the scene properties, so
-            // ignore those.
-            // Brightness, set above, is ok.
             return Ok(());
         }
 
         if let Some(color) = &command.color {
-            state
-                .device_set_color_rgb(&device, color.r, color.g, color.b)
-                .await
-                .context("mqtt_light_command: state.device_set_color_rgb")?;
+            ops.push(DeviceOp::SetColorRgb {
+                r: color.r,
+                g: color.g,
+                b: color.b,
+            });
             power_on = false;
         }
         if let Some(color_temp) = command.color_temp {
-            state
-                .device_set_color_temperature(&device, mired_to_kelvin(color_temp))
-                .await
-                .context("mqtt_light_command: state.device_set_color_temperature")?;
+            ops.push(DeviceOp::SetColorTemperature(mired_to_kelvin(color_temp)));
             power_on = false;
         }
+
+        state
+            .execute_ops(&device, &ops)
+            .await
+            .context("mqtt_light_command: state.execute_ops")?;
 
         if power_on {
             if is_light {

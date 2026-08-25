@@ -147,6 +147,39 @@ pub trait Transport: Send + Sync {
         op: &DeviceOp,
     ) -> anyhow::Result<Handled>;
 
+    /// Carry out several operations as one unit.
+    ///
+    /// The default runs them in order, which is what the cloud and LAN APIs
+    /// need anyway. The BLE transport overrides it to merge them into a single
+    /// radio session: "on, 60%, warm white" becomes one connection carrying
+    /// three frames instead of three connections.
+    ///
+    /// A transport that declines before doing anything lets the router move on.
+    /// One that declines *after* something has already taken effect is an
+    /// error, not a fallback: retrying elsewhere would apply the earlier
+    /// operations twice.
+    async fn try_execute_batch(
+        &self,
+        state: &StateHandle,
+        device: &Device,
+        ops: &[DeviceOp],
+    ) -> anyhow::Result<Handled> {
+        let mut applied = 0;
+        for op in ops {
+            match self.try_execute(state, device, op).await? {
+                Handled::Yes => applied += 1,
+                Handled::NotSupported if applied == 0 => return Ok(Handled::NotSupported),
+                Handled::NotSupported => anyhow::bail!(
+                    "{} applied {applied} of {} changes to {device} and then could not {}",
+                    self.id(),
+                    ops.len(),
+                    op.describe()
+                ),
+            }
+        }
+        Ok(Handled::Yes)
+    }
+
     /// Whether an error should fall through to the next transport rather than
     /// aborting. The cloud and LAN transports deliberately return `false`, which
     /// preserves upstream behaviour: a failing LAN command surfaces as an error
@@ -205,7 +238,24 @@ pub async fn execute_op(
     op: &DeviceOp,
     override_order: Option<&[TransportId]>,
 ) -> anyhow::Result<()> {
-    let order = resolve_order(op, override_order);
+    execute_ops(state, device, std::slice::from_ref(op), override_order).await
+}
+
+/// Run several operations against `device` as one unit.
+///
+/// The transport order is decided by the first operation; a batch is only ever
+/// built from operations that belong together, and splitting one across two
+/// transports would leave a light half configured.
+pub async fn execute_ops(
+    state: &StateHandle,
+    device: &Device,
+    ops: &[DeviceOp],
+    override_order: Option<&[TransportId]>,
+) -> anyhow::Result<()> {
+    let Some(first) = ops.first() else {
+        return Ok(());
+    };
+    let order = resolve_order(first, override_order);
     let mut declined = vec![];
 
     for id in order {
@@ -214,13 +264,13 @@ pub async fn execute_op(
             continue;
         };
 
-        match transport.try_execute(state, device, op).await {
+        match transport.try_execute_batch(state, device, ops).await {
             Ok(Handled::Yes) => return Ok(()),
             Ok(Handled::NotSupported) => declined.push(id),
             Err(err) if transport.fallback_on_error() => {
                 log::warn!(
                     "{id} failed to {} for {device}: {err:#}; trying next transport",
-                    op.describe()
+                    first.describe()
                 );
                 declined.push(id);
             }
@@ -235,7 +285,7 @@ pub async fn execute_op(
         .join(", ");
     anyhow::bail!(
         "Unable to {} for {device} (no transport available; declined: {tried})",
-        op.describe()
+        first.describe()
     );
 }
 

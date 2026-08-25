@@ -327,6 +327,25 @@ impl State {
         Ok(())
     }
 
+    /// Run several operations as one unit, so a transport that can batch them
+    /// does. Used for light commands, where Home Assistant sends power,
+    /// brightness and colour together and expects one change, not three.
+    pub async fn execute_ops(
+        self: &Arc<Self>,
+        device: &Device,
+        ops: &[DeviceOp],
+    ) -> anyhow::Result<()> {
+        if ops.is_empty() {
+            return Ok(());
+        }
+        let override_order = self.transport_order.lock().await.clone();
+        transport::execute_ops(self, device, ops, override_order.as_deref()).await?;
+        for op in ops {
+            self.apply_op_side_effects(device, op).await;
+        }
+        Ok(())
+    }
+
     /// Bookkeeping that is a property of the operation rather than of the
     /// transport that carried it. Upstream applied this inconsistently — the
     /// scene was invalidated on the LAN and Platform paths but not the IoT one —
