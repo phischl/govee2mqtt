@@ -84,6 +84,49 @@ impl BleExclusions {
     }
 }
 
+/// Bluetooth addresses the user has corrected by hand.
+///
+/// Needed because Govee's metadata is not always right. One H601B reported an
+/// address one higher than the one derived from its device id; that address
+/// advertised strongly but refused every connection, while the derived one
+/// worked on a sibling device. Until that is understood, the escape hatch has
+/// to exist.
+#[derive(Clone, Debug, Default)]
+pub struct BleAddressOverrides {
+    by_device_id: HashMap<String, String>,
+}
+
+impl BleAddressOverrides {
+    /// Parse `device-id=AA:BB:CC:DD:EE:FF` pairs, comma separated.
+    pub fn parse(spec: &str) -> anyhow::Result<Self> {
+        let mut by_device_id = HashMap::new();
+        for entry in spec.split(',') {
+            let entry = entry.trim();
+            if entry.is_empty() {
+                continue;
+            }
+            let (id, address) = entry.split_once('=').ok_or_else(|| {
+                anyhow::anyhow!("BLE address override {entry:?} is not `device-id=address`")
+            })?;
+            by_device_id.insert(
+                id.trim().to_ascii_lowercase(),
+                address.trim().to_ascii_uppercase(),
+            );
+        }
+        Ok(Self { by_device_id })
+    }
+
+    pub fn get(&self, device_id: &str) -> Option<&str> {
+        self.by_device_id
+            .get(&device_id.to_ascii_lowercase())
+            .map(String::as_str)
+    }
+
+    pub fn entries(&self) -> usize {
+        self.by_device_id.len()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct BleSchedulerConfig {
     /// How long to gather commands for one device before sending them.
@@ -100,6 +143,9 @@ pub struct BleSchedulerConfig {
     /// The whole budget for a job, queue time and execution together. The
     /// executor enforces it and answers with a timeout rather than running on.
     pub deadline: Duration,
+    /// How long to wait for a free session slot before declining and letting
+    /// another transport serve the command.
+    pub permit_wait: Duration,
     /// Consecutive failures before BLE is disabled for a device.
     pub breaker_threshold: u32,
     /// How long BLE stays disabled for a device once the breaker opens.
@@ -108,6 +154,8 @@ pub struct BleSchedulerConfig {
     pub query_timeout: Duration,
     /// Devices to keep off Bluetooth while it stays enabled for everything else.
     pub exclusions: BleExclusions,
+    /// Hand-corrected Bluetooth addresses.
+    pub address_overrides: BleAddressOverrides,
     /// Read back the attributes we just changed, in the same session.
     ///
     /// Costs no extra connection and catches a frame the device dropped, which
@@ -123,10 +171,12 @@ impl Default for BleSchedulerConfig {
             max_concurrent: 1,
             keep_open: Duration::from_secs(30),
             deadline: Duration::from_secs(30),
+            permit_wait: Duration::from_millis(500),
             breaker_threshold: 3,
             breaker_cooldown: Duration::from_secs(300),
             query_timeout: Duration::from_secs(5),
             exclusions: BleExclusions::default(),
+            address_overrides: BleAddressOverrides::default(),
             verify_writes: true,
         }
     }
@@ -317,6 +367,14 @@ impl BleScheduler {
 
     pub fn bridge(&self) -> &Arc<BleBridge> {
         &self.bridge
+    }
+
+    /// The address to use for a device, honouring any hand-corrected override.
+    pub fn address_for(&self, device: &Device) -> Option<String> {
+        if let Some(address) = self.config.address_overrides.get(&device.id) {
+            return Some(address.to_string());
+        }
+        device.ble_address()
     }
 
     /// Whether BLE is currently worth attempting for a device.
@@ -529,7 +587,20 @@ impl BleScheduler {
 
         // Held for the whole exchange: releasing on publish would let the next
         // session start while this one still owns a connection slot.
-        let _permit = self.gate.acquire().await?;
+        //
+        // Bounded, though. If every session slot is busy, waiting here would
+        // queue the command behind radio work of unknown length while a
+        // perfectly good cloud transport sits idle. Declining lets the router
+        // move on, which is what "if the proxies are busy, use something else"
+        // has to mean in practice.
+        let _permit = match tokio::time::timeout(self.config.permit_wait, self.gate.acquire()).await
+        {
+            Ok(permit) => permit?,
+            Err(_) => anyhow::bail!(
+                "all {} BLE session slot(s) are busy",
+                self.config.max_concurrent
+            ),
+        };
 
         log::debug!(
             "BLE job {job_id}: {} frame(s), {} query/queries to {sku} {device_id} at {address}",
@@ -546,7 +617,8 @@ impl BleScheduler {
         }
 
         log::info!(
-            "Using BLE to reach {sku} {device_id} ({} frame(s), {} query/queries, {}ms)",
+            "Using BLE to reach {sku} {device_id} at {address} \
+             ({} frame(s), {} query/queries, {}ms)",
             frames.len(),
             queries.len(),
             response.duration_ms
@@ -636,7 +708,12 @@ impl BleScheduler {
         let breaker = breakers.entry(device_id.to_string()).or_default();
         breaker.consecutive_failures += 1;
 
-        if breaker.consecutive_failures >= self.config.breaker_threshold {
+        // A job that burned its whole budget is not an ordinary failure: it cost
+        // the caller 30 seconds and says the device is not answering. Waiting
+        // for two more of those before setting the device aside spends a minute
+        // proving what we already know.
+        let expensive = reason.contains("budget") || reason.contains("Timeout");
+        if expensive || breaker.consecutive_failures >= self.config.breaker_threshold {
             // Only announce the transition. A device that stays unreachable
             // reopens the breaker every cooldown, and repeating the warning
             // forever would be noise rather than information.
@@ -874,6 +951,31 @@ mod test {
 
     fn device(sku: &str, id: &str) -> Device {
         Device::new(sku, id)
+    }
+
+    #[test]
+    fn an_address_override_replaces_the_derived_one() {
+        let overrides =
+            BleAddressOverrides::parse("4C:50:60:74:F4:2B:C9:14=60:74:F4:2B:C9:14").unwrap();
+
+        assert_eq!(
+            overrides.get("4c:50:60:74:f4:2b:c9:14"),
+            Some("60:74:F4:2B:C9:14")
+        );
+        assert_eq!(overrides.get("something-else"), None);
+    }
+
+    #[test]
+    fn a_malformed_override_is_rejected_rather_than_ignored() {
+        // Silently dropping it would leave the user wondering why their
+        // correction had no effect.
+        assert!(BleAddressOverrides::parse("no-equals-sign").is_err());
+    }
+
+    #[test]
+    fn blank_override_entries_are_skipped() {
+        let overrides = BleAddressOverrides::parse(" a=AA:BB:CC:DD:EE:FF , ").unwrap();
+        assert_eq!(overrides.entries(), 1);
     }
 
     #[test]

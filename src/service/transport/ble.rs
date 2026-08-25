@@ -54,7 +54,7 @@ impl BleTransport {
         }
 
         let scheduler = state.get_ble_scheduler().await?;
-        let address = device.ble_address()?;
+        let address = scheduler.address_for(device)?;
 
         if !scheduler.is_available_for(device).await {
             return None;

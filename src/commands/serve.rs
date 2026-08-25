@@ -1,7 +1,9 @@
 use crate::lan_api::Client as LanClient;
 use crate::platform_api::{DeviceType, GoveeApiClient};
 use crate::service::ble_bridge::BleBridge;
-use crate::service::ble_scheduler::{BleExclusions, BleScheduler, BleSchedulerConfig};
+use crate::service::ble_scheduler::{
+    BleAddressOverrides, BleExclusions, BleScheduler, BleSchedulerConfig,
+};
 use crate::service::device::Device;
 use crate::service::hass::spawn_hass_integration;
 use crate::service::http::run_http_server;
@@ -61,8 +63,10 @@ async fn poll_via_ble(
     device: &Device,
     now: chrono::DateTime<Utc>,
 ) -> anyhow::Result<()> {
-    let (Some(scheduler), Some(address)) = (state.get_ble_scheduler().await, device.ble_address())
-    else {
+    let Some(scheduler) = state.get_ble_scheduler().await else {
+        return Ok(());
+    };
+    let Some(address) = scheduler.address_for(device) else {
         return Ok(());
     };
 
@@ -464,6 +468,13 @@ impl ServeCommand {
                 exclusions,
                 ..BleSchedulerConfig::default()
             };
+            if let Some(spec) = args.ble_args.address_map()? {
+                config.address_overrides = BleAddressOverrides::parse(&spec)?;
+                log::info!(
+                    "Using {} hand-corrected BLE address(es)",
+                    config.address_overrides.entries()
+                );
+            }
             if let Some(max_concurrent) = args.ble_args.max_concurrent()? {
                 config.max_concurrent = max_concurrent.max(1);
                 log::info!(

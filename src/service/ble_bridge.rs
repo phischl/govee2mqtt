@@ -39,6 +39,13 @@ pub struct BleArguments {
     #[arg(long, global = true)]
     ble_max_concurrent: Option<usize>,
 
+    /// Correct the Bluetooth address for specific devices, as a comma separated
+    /// list of `device-id=AA:BB:CC:DD:EE:FF` pairs. Only needed when Govee's
+    /// metadata reports an address the device does not answer on.
+    /// You may also set this via the GOVEE_BLE_ADDRESS_MAP environment variable.
+    #[arg(long, global = true)]
+    ble_address_map: Option<String>,
+
     /// Keep individual devices off Bluetooth while leaving it enabled for
     /// everything else. Comma separated; each entry matches a device id, SKU or
     /// name, so `H601B` excludes a whole model and
@@ -61,6 +68,13 @@ impl BleArguments {
         Ok(match self.ble_max_concurrent {
             Some(value) => Some(value),
             None => crate::opt_env_var::<usize>("GOVEE_BLE_MAX_CONCURRENT")?,
+        })
+    }
+
+    pub fn address_map(&self) -> anyhow::Result<Option<String>> {
+        Ok(match &self.ble_address_map {
+            Some(spec) => Some(spec.clone()),
+            None => crate::opt_env_var::<String>("GOVEE_BLE_ADDRESS_MAP")?,
         })
     }
 

@@ -103,6 +103,10 @@ if bashio::config.has_value transport_order ; then
   export GOVEE_TRANSPORT_ORDER="$(bashio::config transport_order)"
 fi
 
+if bashio::config.has_value ble_address_map ; then
+  export GOVEE_BLE_ADDRESS_MAP="$(bashio::config ble_address_map)"
+fi
+
 if bashio::config.has_value temperature_scale ; then
   export GOVEE_TEMPERATURE_SCALE="$(bashio::config temperature_scale)"
 fi
