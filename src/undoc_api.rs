@@ -868,6 +868,11 @@ pub struct DeviceSettings {
     /// eg: Glide Hexa. Value is base64 encoded data
     pub shapes: Option<String>,
     pub support_ble_broad_v3: Option<bool>,
+    /// Appeared in Govee's metadata on 2026-08-25. Meaning unconfirmed —
+    /// presumably whether the device expects encrypted BLE traffic, which would
+    /// matter to `service/ble_*` if it ever turns out to be false for a device
+    /// we talk to. Parsed so that debug builds keep working; nothing reads it.
+    pub support_enc: Option<bool>,
 }
 
 #[derive(Deserialize, Debug, Clone)]

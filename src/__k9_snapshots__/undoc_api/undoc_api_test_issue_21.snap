@@ -92,6 +92,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -239,6 +240,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -388,6 +390,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -535,6 +538,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -686,6 +690,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -835,6 +840,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -982,6 +988,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -1129,6 +1136,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -1276,6 +1284,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -1423,6 +1432,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -1568,6 +1578,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -1713,6 +1724,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -1860,6 +1872,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -2007,6 +2020,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -2154,6 +2168,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -2299,6 +2314,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -2446,6 +2462,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -2593,6 +2610,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -2740,6 +2758,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -2887,6 +2906,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -3034,6 +3054,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -3181,6 +3202,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -3328,6 +3350,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -3475,6 +3498,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -3622,6 +3646,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -3769,6 +3794,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -3920,6 +3946,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -4053,6 +4080,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -4192,6 +4220,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -4325,6 +4354,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -4470,6 +4500,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -4626,6 +4657,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -4773,6 +4805,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -4920,6 +4953,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -5067,6 +5101,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -5214,6 +5249,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -5361,6 +5397,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -5517,6 +5554,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -5673,6 +5711,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -5820,6 +5859,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -5976,6 +6016,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -6123,6 +6164,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -6270,6 +6312,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -6417,6 +6460,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -6564,6 +6608,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -6711,6 +6756,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -6856,6 +6902,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -6997,6 +7044,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -7142,6 +7190,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -7289,6 +7338,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -7436,6 +7486,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -7583,6 +7634,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -7728,6 +7780,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -7873,6 +7926,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -8020,6 +8074,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -8167,6 +8222,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -8314,6 +8370,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -8459,6 +8516,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -8604,6 +8662,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -8749,6 +8808,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -8894,6 +8954,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -9047,6 +9108,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -9204,6 +9266,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -9345,6 +9408,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -9492,6 +9556,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -9637,6 +9702,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -9782,6 +9848,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -9927,6 +9994,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -10072,6 +10140,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -10217,6 +10286,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -10362,6 +10432,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -10507,6 +10578,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -10660,6 +10732,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -10807,6 +10880,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -10940,6 +11014,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -11083,6 +11158,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -11228,6 +11304,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -11373,6 +11450,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -11518,6 +11596,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -11663,6 +11742,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -11808,6 +11888,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -11941,6 +12022,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -12072,6 +12154,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -12215,6 +12298,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -12360,6 +12444,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -12505,6 +12590,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -12650,6 +12736,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -12783,6 +12870,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -12926,6 +13014,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -13071,6 +13160,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -13216,6 +13306,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -13349,6 +13440,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -13492,6 +13584,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -13625,6 +13718,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -13768,6 +13862,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -13913,6 +14008,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -14058,6 +14154,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -14203,6 +14300,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -14348,6 +14446,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -14481,6 +14580,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -14624,6 +14724,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -14769,6 +14870,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -14914,6 +15016,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -15059,6 +15162,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -15206,6 +15310,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -15353,6 +15458,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -15498,6 +15604,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -15649,6 +15756,7 @@ DevicesResponse {
                     filter_expire_on_off: true,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -15800,6 +15908,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -15947,6 +16056,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -16098,6 +16208,7 @@ DevicesResponse {
                     filter_expire_on_off: true,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -16243,6 +16354,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -16370,6 +16482,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -16493,6 +16606,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -16630,6 +16744,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -16779,6 +16894,7 @@ DevicesResponse {
                         "CgBABkAGSgEAHgYFBh4AAGMGBQaWAABABsoFHgAAHgaOBR4AAGMGjgWWAABABlMFHgAAHgYYBR4AAGMGGAWWAABABtwEHgA=",
                     ),
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -16924,6 +17040,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -17077,6 +17194,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -17212,6 +17330,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -17359,6 +17478,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -17506,6 +17626,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -17653,6 +17774,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -17800,6 +17922,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -17947,6 +18070,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -18086,6 +18210,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -18235,6 +18360,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -18382,6 +18508,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -18521,6 +18648,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -18674,6 +18802,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -18825,6 +18954,7 @@ DevicesResponse {
                     filter_expire_on_off: true,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -18972,6 +19102,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -19117,6 +19248,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -19262,6 +19394,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -19407,6 +19540,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -19552,6 +19686,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -19699,6 +19834,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -19844,6 +19980,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -19989,6 +20126,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -20136,6 +20274,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -20287,6 +20426,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -20422,6 +20562,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -20569,6 +20710,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
@@ -20714,6 +20856,7 @@ DevicesResponse {
                     filter_expire_on_off: false,
                     shapes: None,
                     support_ble_broad_v3: None,
+                    support_enc: None,
                 },
                 ext_resources: ExtResources {
                     sku_url: Some(
