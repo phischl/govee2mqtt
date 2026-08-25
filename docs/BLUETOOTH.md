@@ -68,9 +68,15 @@ commands costs one connection.
 }
 ```
 
-`priority` is `user` or `poll`; `user` jobs are dequeued first. `deadline_ms`
-covers queue time: a job that waited longer than its deadline is answered with a
-`timeout` error rather than executed, since the add-on has already given up on it.
+`priority` is `user` or `poll`; `user` jobs are dequeued first.
+
+**`deadline_ms` is the whole budget**, queue time and execution together. A job
+that waited longer than its deadline is answered with a `timeout` error rather
+than started, and one that overruns while running is abandoned and answered the
+same way. This matters more than it looks: bleak allows 20 s per connect attempt,
+so a device that is visible but unreachable would otherwise hold a worker for
+over a minute — and with the default of one worker, that stalls every other
+device too.
 
 `keep_open_ms` overrides the configured idle timeout for this device; `0` means
 use the configured value.

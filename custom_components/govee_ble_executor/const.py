@@ -22,6 +22,10 @@ DEFAULT_MAX_CONCURRENT = 1
 # on one of a proxy's three slots.
 DEFAULT_IDLE_TIMEOUT = 30.0
 
+# Used when a request carries no deadline of its own. The add-on always sends
+# one; this only guards against a hand-crafted request pinning a worker.
+DEFAULT_JOB_BUDGET_MS = 30000
+
 TOPIC_REQUEST = "req"
 TOPIC_RESPONSE = "res"
 TOPIC_STATUS = "status"

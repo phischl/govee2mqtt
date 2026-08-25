@@ -25,6 +25,7 @@ from homeassistant.core import HomeAssistant, callback
 
 from .const import (
     DEFAULT_IDLE_TIMEOUT,
+    DEFAULT_JOB_BUDGET_MS,
     DEFAULT_MAX_CONCURRENT,
     DEFAULT_TOPIC_PREFIX,
     TOPIC_REQUEST,
@@ -180,8 +181,30 @@ class BleExecutor:
             session = BleSession(self._hass, job.address, self._idle_timeout)
             self._sessions[job.address] = session
 
+        # The add-on's deadline is the whole budget, execution included. Without
+        # bounding the work here a device that is visible but unreachable would
+        # hold a worker far past the point where the add-on gave up waiting, and
+        # with a single worker that stalls every other device too.
+        budget = (job.deadline_ms or DEFAULT_JOB_BUDGET_MS) / 1000
+
         try:
-            results = await session.run(job)
+            async with asyncio.timeout(budget):
+                results = await session.run(job)
+        except TimeoutError:
+            # Whatever half-open connection is left would otherwise sit on a
+            # proxy's connection slot until it times out on its own.
+            await session.async_stop()
+            _LOGGER.debug("[%s] job %s exceeded its %.1fs budget", job.address, job.id, budget)
+            await self._respond(
+                JobResponse(
+                    id=job.id,
+                    ok=False,
+                    duration_ms=int((time.monotonic() - started) * 1000),
+                    error_kind=ErrorKind.TIMEOUT,
+                    error_message=f"job did not finish within its {budget:.1f}s budget",
+                )
+            )
+            return
         except SessionError as err:
             _LOGGER.debug("[%s] job %s failed: %s", job.address, job.id, err.message)
             response = JobResponse(

@@ -29,7 +29,10 @@ from .protocol import DelayOp, ErrorKind, JobRequest, Op, QueryOp, WriteOp, noti
 
 _LOGGER = logging.getLogger(__name__)
 
-MAX_CONNECT_ATTEMPTS: Final = 3
+# bleak allows 20s per connect attempt, and the executor runs a small worker
+# pool, so a device that is visible but unreachable would otherwise hold the
+# queue for a minute or more. Two attempts is the most a job's budget affords.
+MAX_CONNECT_ATTEMPTS: Final = 2
 
 
 class SessionError(Exception):

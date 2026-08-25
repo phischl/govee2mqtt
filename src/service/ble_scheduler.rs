@@ -97,7 +97,8 @@ pub struct BleSchedulerConfig {
     pub max_concurrent: usize,
     /// How long the executor should hold the connection open afterwards.
     pub keep_open: Duration,
-    /// How long the executor may take before we give up on the job.
+    /// The whole budget for a job, queue time and execution together. The
+    /// executor enforces it and answers with a timeout rather than running on.
     pub deadline: Duration,
     /// Consecutive failures before BLE is disabled for a device.
     pub breaker_threshold: u32,
@@ -121,7 +122,7 @@ impl Default for BleSchedulerConfig {
             inter_frame_delay: Duration::from_millis(200),
             max_concurrent: 1,
             keep_open: Duration::from_secs(30),
-            deadline: Duration::from_secs(20),
+            deadline: Duration::from_secs(30),
             breaker_threshold: 3,
             breaker_cooldown: Duration::from_secs(300),
             query_timeout: Duration::from_secs(5),
@@ -481,12 +482,10 @@ impl BleScheduler {
         };
         let job_id = job.id.clone();
 
-        // Allow for the executor's own queue and for however long the queries
-        // may take, on top of its deadline, so that our timeout is a genuine
-        // "the executor is gone" signal rather than a race with a live job.
-        let timeout = self.config.deadline
-            + self.config.query_timeout * (queries.len() as u32 + 1)
-            + Duration::from_secs(10);
+        // The executor bounds the job to `deadline` and answers either way, so
+        // our own timeout only needs enough margin to distinguish "the executor
+        // is gone" from "the executor is about to answer".
+        let timeout = self.config.deadline + Duration::from_secs(15);
 
         // Held for the whole exchange: releasing on publish would let the next
         // session start while this one still owns a connection slot.
