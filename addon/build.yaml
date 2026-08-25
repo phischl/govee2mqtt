@@ -11,10 +11,20 @@ labels:
 build_from:
   aarch64: "ghcr.io/home-assistant/aarch64-base-debian:bookworm"
   amd64: "ghcr.io/home-assistant/amd64-base-debian:bookworm"
-cosign:
-  # The identity is *our* identity that we use to sign this image.
-  # It is used to verify the safety of reusing the cache
-  identity: https://github.com/phischl/govee2mqtt/.*
-  # The base_identity is the identity of the base images specified
-  # by the build_from section above
-  base_identity: https://github.com/home-assistant/docker-base/.*
+# There is deliberately no cosign section here.
+#
+# Its presence is what makes the builder verify the Home Assistant base images,
+# and the builder pins cosign v2.5.3 (via sigstore/cosign-installer@v4.0.0)
+# while sigstore now requires v2.6.0 or later. The base images themselves are
+# fine — verifying them with a current cosign succeeds:
+#
+#   docker run --rm ghcr.io/sigstore/cosign/cosign:latest verify \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+#     --certificate-identity-regexp 'https://github.com/home-assistant/docker-base/.*' \
+#     ghcr.io/home-assistant/amd64-base-debian:bookworm
+#
+# Removing --cosign from the builder args is not enough on its own; this block
+# drives base image validation independently of that flag.
+#
+# Restore this once the add-on jobs move to the composable builder actions,
+# which use a current cosign.
