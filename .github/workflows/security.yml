@@ -56,11 +56,22 @@ jobs:
           category: trivy-fs
 
   image:
-    name: Published image
+    name: Published image (${{ matrix.image }})
     # Needs an image to scan, so it is pointless on a pull request from a fork
     # and on a branch that has not been published.
     if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The add-on images are what most people actually run, and they have a
+        # different base from the standalone one -- Home Assistant's Debian
+        # base rather than distroless -- so scanning only the standalone image
+        # would miss the CVEs that matter here.
+        image:
+          - govee2mqtt
+          - govee2mqtt-amd64
+          - govee2mqtt-aarch64
     permissions:
       contents: read
       packages: read
@@ -68,11 +79,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Scan ghcr.io/${{ github.repository_owner }}/govee2mqtt:latest
+      - name: Scan ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:latest
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
-          image-ref: ghcr.io/${{ github.repository_owner }}/govee2mqtt:latest
+          image-ref: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:latest
           format: sarif
           output: trivy-image.sarif
           trivyignores: .trivyignore.yaml
@@ -82,4 +93,5 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-image.sarif
-          category: trivy-image
+          # Distinct per image, otherwise each upload would replace the last.
+          category: trivy-image-${{ matrix.image }}
