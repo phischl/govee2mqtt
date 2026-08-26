@@ -121,6 +121,15 @@ impl HassClient {
         log::trace!("register_with_hass: register entities");
         entities.publish_config(state, self).await?;
 
+        // And take back any segment entity a device has since told us it does
+        // not have. Startup is when this matters: the counts were learned in an
+        // earlier run and Home Assistant still remembers the old ones.
+        for device in state.devices().await {
+            if let Err(err) = self.retract_stale_segments(&device, state).await {
+                log::warn!("retracting stale segments for {device}: {err:#}");
+            }
+        }
+
         // Allow hass extra time to register the entities before
         // we mark them as available
         let delay = tokio::time::Duration::from_millis((10 * entities.len()) as u64);
@@ -187,7 +196,49 @@ impl HassClient {
         let mut entities = EntityList::new();
         enumerate_entities_for_device(device, state, &mut entities).await?;
         entities.publish_config(state, self).await?;
+        self.retract_stale_segments(device, state).await?;
         entities.notify_state(self).await?;
+
+        Ok(())
+    }
+
+    /// Remove segment entities this device turned out not to have.
+    ///
+    /// Publishing a config adds or updates an entity; the only way to take one
+    /// away is to publish an **empty** payload to its discovery topic. Without
+    /// this, correcting a count downwards has no visible effect — an H7093 that
+    /// Govee claimed had fifteen segments keeps thirteen controls that do
+    /// nothing, because they were registered before the device spoke.
+    ///
+    /// The band runs from what the device really has up to the largest count we
+    /// might ever have believed. Retracting a topic that was never published is
+    /// harmless, so this stays idempotent and needs no bookkeeping — which is
+    /// the `TODO: remember all published topics for future GC` in
+    /// `hass_mqtt::instance`, solved narrowly for the one case that bites.
+    async fn retract_stale_segments(
+        &self,
+        device: &ServiceDevice,
+        state: &StateHandle,
+    ) -> anyhow::Result<()> {
+        let real = device.visible_segment_count().unwrap_or(0);
+        let Some(ever) = device.segment_count() else {
+            return Ok(());
+        };
+        if ever <= real {
+            return Ok(());
+        }
+
+        let disco = state.get_hass_disco_prefix().await;
+        let id = topic_safe_id(device);
+        log::info!("Retracting segment entities {real}..{ever} for {device}");
+
+        for n in real..ever {
+            self.publish(
+                format!("{disco}/light/gv2mqtt-{id}-{n}/config"),
+                String::new(),
+            )
+            .await?;
+        }
 
         Ok(())
     }
