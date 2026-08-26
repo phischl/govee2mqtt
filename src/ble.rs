@@ -970,6 +970,11 @@ impl Base64HexBytes {
     pub fn with_bytes(bytes: Vec<u8>) -> Self {
         Self(HexBytes(finish(bytes)))
     }
+
+    /// The raw frame bytes, for callers that do their own framing.
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.0 .0
+    }
 }
 
 impl<'de> Deserialize<'de> for Base64HexBytes {
@@ -994,9 +999,20 @@ fn calculate_checksum(data: &[u8]) -> u8 {
     checksum
 }
 
+/// Pad a frame body to nineteen bytes and append its XOR checksum.
+///
+/// The resize comes **before** the checksum, which makes this idempotent: given
+/// an already-finished twenty-byte frame it truncates the old checksum, computes
+/// the same value over the same nineteen bytes, and hands back what it was
+/// given. That is not a nicety. With the two lines the other way round the
+/// checksum ran over the payload *and its own checksum*, and `x ^ x == 0`, so a
+/// double-finished frame went out with checksum `00` and every device silently
+/// discarded it. Every segment colour command the AWS IoT path ever sent was
+/// invalid that way, and nothing noticed because a frame is never acknowledged
+/// on the wire.
 fn finish(mut data: Vec<u8>) -> Vec<u8> {
-    let checksum = calculate_checksum(&data);
     data.resize(19, 0);
+    let checksum = calculate_checksum(&data);
     data.push(checksum);
     data
 }
@@ -1301,6 +1317,50 @@ a3 ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5c
     fn optional_kelvin_distinguishes_rgb_from_white() {
         assert_eq!(OptionalKelvin(0).get(), None);
         assert_eq!(OptionalKelvin(2700).get(), Some(2700));
+    }
+
+    /// Finishing a frame twice must not change it.
+    ///
+    /// `Base64HexBytes::with_bytes` finishes whatever it is handed, and
+    /// `service::segments` hands it frames the codec has already finished. With
+    /// the checksum taken before the truncation that produced checksum `00` --
+    /// `x ^ x == 0` -- and the device discarded every one of them without a
+    /// word. Nothing on the wire says a frame was rejected, so this went
+    /// unnoticed until a device that *does* echo a receipt stayed silent.
+    #[test]
+    fn finishing_a_finished_frame_changes_nothing() {
+        let once = SetSegmentColorRgb::for_segments([5u32], (0, 255, 0))
+            .and_then(|c| encode_for_generic_light(&c))
+            .unwrap();
+        assert_eq!(once.len(), 20);
+        assert_eq!(finish(once.clone()), once);
+
+        // And the checksum is the one the hardware accepted, not zero.
+        assert_ne!(*once.last().unwrap(), 0);
+        assert_eq!(*once.last().unwrap(), calculate_checksum(&once[..19]));
+    }
+
+    /// The bytes the AWS IoT path actually puts on the wire.
+    ///
+    /// Asserted through `Base64HexBytes`, the type `send_rgb_via_iot` uses,
+    /// because the defect lived in that hop and not in the codec: the codec's
+    /// own round-trip test passed throughout.
+    #[test]
+    fn segment_colour_survives_the_trip_through_base64() {
+        let command = SetSegmentColorRgb::for_segments([0u32, 11], (255, 0, 0)).unwrap();
+        let raw = encode_for_generic_light(&command).unwrap();
+
+        let wrapped = Base64HexBytes::with_bytes(raw.clone());
+        assert_eq!(wrapped.0 .0, raw, "wrapping must not re-finish the frame");
+
+        let encoded = wrapped.base64();
+        assert_eq!(encoded.len(), 1);
+        let decoded = data_encoding::BASE64.decode(encoded[0].as_bytes()).unwrap();
+        assert_eq!(decoded, raw);
+        assert_eq!(
+            Base64HexBytes(HexBytes(decoded)).decode_for_sku(GENERIC_LIGHT),
+            GoveeBlePacket::SetSegmentColorRgb(command)
+        );
     }
 
     /// Every one of these was sent to a real H6072 or H7020 and the change

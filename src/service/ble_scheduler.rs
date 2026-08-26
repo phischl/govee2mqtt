@@ -443,21 +443,29 @@ impl Query {
             Self::Color => query_device_color(),
             Self::Segments(page) => query_segment_colors(*page),
         };
-        let mut chunks = encoded.base64();
+        let chunks = encoded.base64();
         anyhow::ensure!(chunks.len() == 1, "a query should be a single frame");
-        Ok(chunks.remove(0).into_bytes())
+        Ok(encoded.into_bytes())
     }
 }
 
+/// A single raw 20-byte frame.
+///
+/// Raw, not base64: the wire format wants base64 but the encoding belongs at
+/// the wire boundary, in `exchange`, and nowhere else. It used to happen here,
+/// so `Vec<u8>` meant "base64 text" on this path and "frame bytes" on the one
+/// `service::segments` uses — and the compiler cannot tell those apart. Feeding
+/// real frame bytes to the base64-expecting side made `String::from_utf8`
+/// reject them, which is how segment colour over Bluetooth failed.
 fn encode<T: 'static>(value: &T) -> anyhow::Result<Vec<u8>> {
     let encoded = Base64HexBytes::encode_for_sku(GENERIC_LIGHT, value)?;
-    let mut chunks = encoded.base64();
+    let chunks = encoded.base64();
     anyhow::ensure!(
         chunks.len() == 1,
         "expected a single 20 byte frame, got {} chunks",
         chunks.len()
     );
-    Ok(chunks.remove(0).into_bytes())
+    Ok(encoded.into_bytes())
 }
 
 type Waiter = oneshot::Sender<Result<(), String>>;
@@ -777,7 +785,7 @@ impl BleScheduler {
             }
             ops.push(JobOp::Write(WriteSpec {
                 char: GOVEE_WRITE_CHAR,
-                data: String::from_utf8(frame.clone())?,
+                data: data_encoding::BASE64.encode(frame),
                 response: false,
             }));
         }
@@ -791,7 +799,7 @@ impl BleScheduler {
             ops.push(JobOp::Query(QuerySpec {
                 write_char: GOVEE_WRITE_CHAR,
                 notify_char: GOVEE_NOTIFY_CHAR,
-                data: String::from_utf8(query.frame()?)?,
+                data: data_encoding::BASE64.encode(&query.frame()?),
                 timeout_ms: query.timeout(self.config.query_timeout).as_millis() as u64,
                 optional: query.is_speculative(),
                 // Pages are contiguous, so the first silence ends the list.
@@ -1219,6 +1227,38 @@ mod test {
             .is_open(Instant::now()));
     }
 
+    /// `exchange` is fed from two places -- `PendingOps::frames` for ordinary
+    /// commands and `service::segments` for segment colour -- through a
+    /// `&[Vec<u8>]` that cannot say which kind of bytes it holds. This pins the
+    /// contract to raw frames.
+    ///
+    /// It is the test that was missing. `PendingOps::frames` used to hand over
+    /// base64 *text* and `segments` handed over frame bytes; the wire wants
+    /// base64, so the first worked and the second died in `String::from_utf8`
+    /// on the first byte above 0x7f. Every test passed throughout, because each
+    /// side was only ever tested against itself.
+    #[test]
+    fn frames_leave_the_scheduler_as_raw_bytes() {
+        let mut pending = PendingOps::default();
+        pending.merge(&DeviceOp::LightPowerOn(true)).unwrap();
+        pending.merge(&DeviceOp::SetBrightness(50)).unwrap();
+
+        for frame in pending.frames(None).unwrap() {
+            assert_eq!(frame.len(), 20, "a Govee frame is twenty bytes");
+            assert_eq!(frame[0], 0x33, "a write frame starts with 0x33");
+            assert_eq!(
+                frame[19],
+                frame[..19].iter().fold(0u8, |a, b| a ^ b),
+                "the checksum has to survive the trip"
+            );
+        }
+
+        // A query travels the same way.
+        let query = Query::Segments(1).frame().unwrap();
+        assert_eq!(query.len(), 20);
+        assert_eq!(&query[..3], &[0xaa, 0xa5, 0x01]);
+    }
+
     fn frames_hex(pending: &PendingOps) -> Vec<String> {
         frames_hex_for(pending, None)
     }
@@ -1228,12 +1268,7 @@ mod test {
             .frames(segments)
             .unwrap()
             .into_iter()
-            .map(|frame| {
-                let raw = data_encoding::BASE64
-                    .decode(&frame)
-                    .expect("frames are base64");
-                raw.iter().map(|b| format!("{b:02x}")).collect()
-            })
+            .map(|frame| frame.iter().map(|b| format!("{b:02x}")).collect())
             .collect()
     }
 
@@ -1416,8 +1451,8 @@ mod test {
     fn queries_are_single_frames() {
         for query in Query::ALL {
             let frame = query.frame().unwrap();
-            let raw = data_encoding::BASE64.decode(&frame).unwrap();
-            assert_eq!(raw.len(), 20, "{query:?}");
+            assert_eq!(frame.len(), 20, "{query:?}");
+            assert_eq!(frame[0], 0xaa, "a query frame starts with 0xaa");
         }
     }
 

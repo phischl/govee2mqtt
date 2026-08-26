@@ -122,25 +122,30 @@ One refuted hypothesis worth keeping, because it looked principled: `33 A5 <page
 the read frame the way `33 01`/`AA 01` and `33 05 0d`/`AA 05 0d` do. The device ignored it
 silently, both switched off and switched on.
 
-**This frame is not universal.** Measured 2026-08-26 on an H6054 — two light bars of six,
-twelve segments, reading confirmed against what a person was looking at. It **acknowledged** both
-`ptReal` messages on the account topic and then reported, eight seconds later, that nothing had
-changed. Nothing changed on the hardware either.
+**A note on a wrong turn, because the shape of it is instructive.** This frame was written up
+here as "not universal" after an H6054 acknowledged it twice over `ptReal` and did nothing. That
+was wrong twice over. The command works on that device — sent by hand with a valid checksum it
+sets exactly the segments its mask names, single bit or all twelve. What did not work was our own
+encoder, which finished an already-finished frame and so shipped every one of them with checksum
+`00`. The device discarded them in silence.
 
-The obvious explanation is ruled out: the H6054 reports `AA 05 15 01`, the same marker byte as
-the H6072 where the command demonstrably works. So it is not the mode byte.
+Two things made this survivable for so long. A frame is never acknowledged on the wire, so
+nothing distinguishes "rejected" from "applied" without reading the state back. And the
+acknowledgement that *does* exist here — see the receipt below — was absent for the broken
+frames, which is the signal that finally located the fault: our own hand-sent frames were
+receipted, the add-on's were not.
 
-What is different about this device is that it is the only one here that sends `AA A9`, and the
-only one built from two physically separate bars:
+The device is still the only one seen sending `AA A9`:
 
 ```
 AA A9 00  06  01 10 03  01 10 03      six, then twice a three-byte group
-AA A9 02  01 32                       0x32 = 50, exactly its per-segment brightness
+AA A9 02  01 32                       0x32 = 50
 ```
 
 `06` with two repeats fits "six per unit, two units" for a twelve-segment two-bar device, so
-`A9` looks like a layout or addressing descriptor and `33 A9 …` is the natural next guess. That
-is a hypothesis from one device; it has not been tried.
+`A9 00` reads like a layout descriptor. `33 A9 02 01 <v>` is a **working write** — the device
+echoes the new value back as `AA A9 02 01 <v>` — but it changes nothing in the `AA A5` pages, so
+whatever it sets, it is not per-segment brightness.
 
 ### `AA 05 15` means "I have segments"
 
