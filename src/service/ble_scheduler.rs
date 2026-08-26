@@ -1035,6 +1035,25 @@ impl BleScheduler {
                         status.brightness = brightness.percent;
                     });
                 }
+                GoveeBlePacket::NotifyDeviceColor(color)
+                    if color.r == 0
+                        && color.g == 0
+                        && color.b == 0
+                        && color.kelvin.get().is_none() =>
+                {
+                    // No colour at all, in either representation. Some devices
+                    // answer `aa 05` with the mode byte and nothing else — an
+                    // H613D reports `aa 05 0d 00 00 00 …` however it is lit —
+                    // and taking that literally overwrote the colour we had
+                    // just set with black. Home Assistant then showed a colour
+                    // picker that offered nothing but black, because that is
+                    // what the state said.
+                    //
+                    // A lit device is never black, and an unlit one says so
+                    // through `aa 01`, which is reported separately. So this
+                    // frame carries no information either way.
+                    log::debug!("{device_id} reported no colour; keeping what we had");
+                }
                 GoveeBlePacket::NotifyDeviceColor(color) => {
                     changed |= device.update_ble_device_status(|status| {
                         status.color = DeviceColor {

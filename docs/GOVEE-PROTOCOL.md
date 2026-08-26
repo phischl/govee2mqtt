@@ -70,6 +70,11 @@ Notes that cost time to learn:
 - The official app appends an RGB companion value to CT frames (6500 K → `ff f9 fb`). It is
   optional, and its values do not follow any colour-temperature approximation we could
   reproduce, so we omit it.
+- **Not every device reports its colour.** An H613D answers `aa 05 01` with
+  `aa 05 0d 00 00 00 …` — the mode byte and nothing else — however it is actually lit. Power and
+  brightness it reports honestly. Read literally that is "black", and a reader that believes it
+  loses the colour it just set. Treat an `aa 05` carrying neither RGB nor Kelvin as carrying no
+  information: a lit device is never black, and an unlit one says so through `aa 01`.
 
 ## 4. Segments
 

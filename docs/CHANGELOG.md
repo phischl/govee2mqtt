@@ -119,6 +119,10 @@ segment. Both were fixed by reading what the devices already say.
 
 ## Robustness
 
+- **A device that will not name its colour keeps the one it was given.** Some answer the colour
+  query with the mode byte and nothing else, however they are lit. Read literally that is black,
+  and it overwrote the colour the command had just set — leaving Home Assistant with a colour
+  picker that offered nothing but black.
 - **A light switched off no longer reports itself as on.** A Govee device
   acknowledges every write with a frame on the same notify handle, and after a command that
   receipt reached the executor before the device's actual answer did. The read-back took the
