@@ -436,7 +436,16 @@ async fn mqtt_light_segment_command(
     Params(IdAndSeg { id, segment }): Params<IdAndSeg>,
     State(state): State<StateHandle>,
 ) -> anyhow::Result<()> {
-    let device = state.resolve_device_for_control(&id).await?;
+    // Deliberately not `resolve_device_for_control`: that takes the per-device
+    // permit, and holding it here would serialise the commands one line before
+    // the batcher's window gets to coalesce them -- which is exactly what it
+    // did. Four segments named in one Home Assistant service call went out as
+    // four AWS IoT messages over two seconds. The batch takes one permit when
+    // it flushes; see `service::segments`.
+    let device = state
+        .resolve_device(&id)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("device '{id}' not found"))?;
     let segment: u32 = segment.parse()?;
 
     let command: HassLightCommand = from_json(&payload)?;

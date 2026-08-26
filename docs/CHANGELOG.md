@@ -57,6 +57,11 @@ segment. Both were fixed by reading what the devices already say.
   without a word. Over Bluetooth the frames were handed to the executor as raw bytes where the
   wire format wants base64. Both are fixed and verified against hardware; a Govee frame is never
   acknowledged on the wire, which is why neither showed up as an error.
+- **A scene is one message again.** The batcher's 150 ms window sat *downstream* of the
+  per-device lock, so it only ever saw one command at a time: four segments named in a single
+  `light.turn_on` went out as four separate messages two seconds apart. The lock now belongs to
+  the batch rather than to each arriving command, which also collapses the read-back — twelve
+  segments cost one status request instead of twelve.
 - **Segment discovery no longer truncates.** It stopped at eighteen segments, and a device that
   reported exactly eighteen could not be told from one that had been cut off. A thirty-slot
   string would have lost twelve silently.

@@ -140,10 +140,13 @@ impl SegmentBatcher {
         device_id: &str,
         pending: &Pending,
     ) -> anyhow::Result<()> {
-        let device = state
-            .device_by_id(device_id)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("device {device_id} went away"))?;
+        // One permit for the whole batch, taken here rather than by each
+        // arriving command. `Coordinator` also schedules the read-back when it
+        // drops, so a batch of twelve segments now costs one status request
+        // instead of twelve. Held until this function returns, which is after
+        // the last transport has had its turn.
+        let control = state.resolve_device_for_control(device_id).await?;
+        let device = (*control).clone();
 
         // Colour goes over AWS IoT when the device is reachable that way: one
         // message carries every colour in the batch, and it spends no Platform
