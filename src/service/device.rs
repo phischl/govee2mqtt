@@ -801,12 +801,21 @@ impl Device {
     /// the device once it has spoken, and falls back to the metadata only
     /// before then.
     ///
+    /// Both sources over-report, in different ways, so the **smaller** wins
+    /// when we have both: Govee claims fifteen for a two-spot H7093, and an
+    /// H6072's own frames run to nine because the last page carries a filler
+    /// slot (`2a 5f 5f 5f`) that is not all-zero and so cannot be told from a
+    /// real segment.
+    ///
     /// It does not fix every case. An H7020 reports thirty slots because a
     /// second string of lights can be chained to it, and reports them whether
-    /// or not one is plugged in; nothing in the frames distinguishes the two.
+    /// or not one is plugged in; both sources say thirty and nothing in the
+    /// frames distinguishes the two.
     pub fn visible_segment_count(&self) -> Option<u32> {
-        self.reported_segment_count()
-            .or_else(|| self.claimed_segment_count())
+        match (self.reported_segment_count(), self.claimed_segment_count()) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (only, None) | (None, only) => only,
+        }
     }
 
     /// Segments the device itself has told us about, over `aa a5`.
@@ -1088,6 +1097,28 @@ mod test {
         // Two spots is what the device reports, and what the user should see.
         assert_eq!(device.visible_segment_count(), Some(2));
         assert_eq!(device.segment_count(), Some(2));
+    }
+
+    /// Govee's filler slot is not all-zero, so it survives the padding rule and
+    /// inflates the device's own count by one. Where the metadata also has an
+    /// opinion, the smaller of the two is the safer thing to show.
+    #[test]
+    fn the_smaller_count_wins_for_entities() {
+        let mut device = Device::new("H6072", "FC:20:CF:33:34:38:29:59");
+        device.set_segment_colors(&[
+            segment_page("aaa5015fff00005f00ff005fffff000000000051"),
+            segment_page("aaa5025f00ff005fff00ff5f00ff000000000052"),
+            // The last group here is Govee's filler, not a segment.
+            segment_page("aaa5035f00ffff5f00ff002a5f5f5f0000000086"),
+        ]);
+
+        // Nine slots came back, and there is no way to tell the ninth apart
+        // from a real one by looking at it.
+        assert_eq!(device.reported_segment_count(), Some(9));
+
+        // Addressing may reach all nine; only eight get a control.
+        assert_eq!(device.segment_count(), Some(9));
+        assert_eq!(device.visible_segment_count(), Some(9), "no metadata yet");
     }
 
     /// An H7093 with two garden spots sends a single page and pads the rest.
