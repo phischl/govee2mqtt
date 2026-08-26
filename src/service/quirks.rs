@@ -174,10 +174,19 @@ impl Quirk {
 /// the slot count the device reports. That is right for everything that cannot
 /// be chained, since then the slots and the hardware agree.
 ///
-/// This is deliberately not a field on [`Quirk`]. A `Quirk` entry carries a
-/// whole capability profile — `Quirk::light` would also declare colour
-/// temperature — and inventing one for the sake of a single number would change
-/// behaviour that has nothing to do with chaining.
+/// This is deliberately not a field on [`Quirk`], though it does live in this
+/// file, which is where per-model knowledge belongs. A `Quirk` entry carries a
+/// whole capability profile, and `Device::get_color_temperature_range` consults
+/// the quirk *before* Govee's metadata — so `Quirk::light` would replace an
+/// H7020's real 2000–9009 K with the constructor's hardcoded 2000–9000, and
+/// give it an icon besides. Neither has anything to do with chaining, and a
+/// list that overrides what the device reports is the shape of mistake that
+/// `iot_api_supported` already made once.
+///
+/// (An earlier version of this comment claimed a quirk would *invent* colour
+/// temperature for this device. That was wrong: every Govee light has it, and
+/// this one reports 2000–9009 K through the Platform API. The objection is that
+/// a quirk would override a correct value, not conjure a false one.)
 pub fn segments_per_chained_string(sku: &str) -> Option<u32> {
     match sku {
         // Fifteen bulbs per string, two strings possible, thirty slots always
