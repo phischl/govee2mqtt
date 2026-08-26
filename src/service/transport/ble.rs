@@ -25,8 +25,8 @@ impl BleTransport {
         if device.is_segmented() {
             // A segmented device ignores the whole-strip colour write, so this
             // used to decline everything but power and let the cloud have it.
-            // The segment command is known now (CLAUDE.md §17) and the
-            // scheduler sends colour as a mask over every segment — but only
+            // The segment command is known now and the scheduler sends
+            // colour as a mask over every segment — but only
             // when it knows how many there are, and colour temperature still
             // has no segment equivalent.
             return match op {

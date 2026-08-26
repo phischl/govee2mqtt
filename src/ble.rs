@@ -752,9 +752,14 @@ pub const SEGMENT_MASK_BYTES: usize = 7;
 /// Set the colour of individual segments.
 ///
 /// `mask` is a little-endian bitfield: bit N addresses segment N, and segments
-/// it does not name keep the colour they had. Reverse-engineered on
-/// 2026-08-25; see CLAUDE.md §17 for the measurements, including why the five
-/// bytes before the mask have to stay zero.
+/// it does not name keep the colour they had. Reverse-engineered on 2026-08-25
+/// against an H6072 and an H7020, using the `aa a5` pages as the oracle. Bits
+/// 0, 3, 5, 15, 16 and 24 were each confirmed individually, so the mask is at
+/// least four bytes wide.
+///
+/// Bytes 7..12 are not free padding and have to stay zero: setting byte 7 to
+/// `0x0a` turned segments 0, 1 and 2 black while the mask named only segment
+/// 0, so a value there changes how the rest of the frame is read.
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
 pub struct SetSegmentColorRgb {
     pub r: u8,
@@ -1299,7 +1304,7 @@ a3 ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5c
     }
 
     /// Every one of these was sent to a real H6072 or H7020 and the change
-    /// confirmed by reading the `aa a5` pages back. See CLAUDE.md §17.
+    /// confirmed by reading the `aa a5` pages back.
     #[test]
     fn segment_colour_commands_match_what_the_hardware_accepted() {
         let cases = [

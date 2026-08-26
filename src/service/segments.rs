@@ -264,8 +264,10 @@ impl SegmentBatcher {
     /// lamp after the reverse-engineering session.
     ///
     /// Brightness is deliberately not attempted. The read frames report it and
-    /// the Govee app sets it, but the command that does so is not known yet
-    /// (CLAUDE.md §17), so it stays on the Platform API.
+    /// the Govee app sets it, but the command that does so is not known: three
+    /// probes -- brightness in byte 7, a `02` sub-command, brightness after the
+    /// mask -- all did nothing or something else. So it stays on the Platform
+    /// API.
     async fn send_rgb_via_iot(
         &self,
         state: &StateHandle,

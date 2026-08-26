@@ -497,9 +497,9 @@ impl State {
             // to return without polling, on the assumption that the device
             // would volunteer its new state. It does so for the whole-device
             // attributes, but not for everything -- per-segment colours are
-            // only ever reported when asked (see CLAUDE.md section 17) -- and a
-            // command that quietly did nothing would leave Home Assistant
-            // showing a state the light never reached.
+            // only ever reported when asked -- and a command that quietly did
+            // nothing would leave Home Assistant showing a state the light
+            // never reached.
             //
             // Asking costs nothing on this channel: no Platform API quota, and
             // a connection we already hold.
