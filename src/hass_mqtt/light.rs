@@ -1,5 +1,6 @@
 use crate::hass_mqtt::base::{Device, EntityConfig, Origin};
 use crate::hass_mqtt::instance::{publish_entity_config, EntityInstance};
+use crate::lan_api::DeviceColor;
 use crate::platform_api::DeviceType;
 use crate::service::device::Device as ServiceDevice;
 use crate::service::hass::{
@@ -113,15 +114,38 @@ impl EntityInstance for DeviceLight {
 
                 let is_on = device_state.light_on.unwrap_or(false);
 
+                // A segmented device does not really have one colour, and some
+                // do not even pretend: a Bluetooth-only H6116 answers the
+                // colour query with the segment marker rather than a colour, so
+                // the whole-device value stays black and Home Assistant's
+                // colour picker collapses to nothing. Its first segment is the
+                // honest answer to "what colour is this light" — a convention
+                // rather than a measurement, but a better one than black.
+                //
+                // Only as a fallback. A device that reports a real colour keeps
+                // it; an H6072 colours every segment at once and its own answer
+                // is the right one.
+                let color = match device_state.color {
+                    DeviceColor { r: 0, g: 0, b: 0 } => device
+                        .segment_color(0)
+                        .map(|segment| DeviceColor {
+                            r: segment.r,
+                            g: segment.g,
+                            b: segment.b,
+                        })
+                        .unwrap_or(device_state.color),
+                    reported => reported,
+                };
+
                 let light_state = if is_on {
                     if device_state.kelvin == 0 {
                         json!({
                             "state": "ON",
                             "color_mode": "rgb",
                             "color": {
-                                "r": device_state.color.r,
-                                "g": device_state.color.g,
-                                "b": device_state.color.b,
+                                "r": color.r,
+                                "g": color.g,
+                                "b": color.b,
                             },
                             "brightness": device_state.brightness,
                             "effect": device_state.scene,

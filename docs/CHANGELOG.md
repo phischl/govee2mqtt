@@ -123,6 +123,10 @@ segment. Both were fixed by reading what the devices already say.
 
 ## Robustness
 
+- **A segmented light shows its first segment's colour** when it reports none of its own. Such a
+  device does not really have one colour, and a Bluetooth-only strip does not even pretend —
+  it answers the colour query with the segment marker, leaving Home Assistant a colour picker
+  with nothing in it. A device that does report a colour keeps it.
 - **A device that will not name its colour keeps the one it was given.** Some answer the colour
   query with the mode byte and nothing else, however they are lit. Read literally that is black,
   and it overwrote the colour the command had just set — leaving Home Assistant with a colour
