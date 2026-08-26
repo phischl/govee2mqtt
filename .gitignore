@@ -10,3 +10,10 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mcp.json
+
+# Working notes and agent configuration. Kept on disk, deliberately not in the
+# repository: CLAUDE.md carries a room-by-room picture of one particular home —
+# device ids, Bluetooth addresses, which lamp is where — that has no business in
+# a public fork, and .claude/ is local tooling.
+CLAUDE.md
+.claude/
