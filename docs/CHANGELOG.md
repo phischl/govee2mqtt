@@ -73,10 +73,10 @@ segment. Both were fixed by reading what the devices already say.
   queries — could burn the whole job budget and leave Home Assistant with *no* state for it at
   all: no power, no colour, nothing. Discovery runs in its own session now and its failure is
   swallowed.
-- **A shrinking segment count takes its entities with it.** Retraction was bounded by the current
-  count, which made it a no-op precisely when it was needed: a device whose count had been too
-  high and then corrected left every extra entity behind. It now retracts up to a fixed bound, so
-  a correction cleans up after itself.
+- **A shrinking segment count takes its entities with it.** Two things stopped that. Retraction
+  was bounded by the current count, so it did nothing precisely when it was needed; and a count
+  that fell was not announced at all, on the reading that only *new* entities need publishing. A
+  correction downwards now republishes and retracts, so it cleans up after itself.
 - **A segment count can no longer cost a device its controls.** Some devices answer every page
   they are asked for, inventing segments past the ones they have, and discovery believed them: a
   Bluetooth-only strip with fifteen real segments climbed to sixty, passed what a command mask can

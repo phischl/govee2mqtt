@@ -229,8 +229,14 @@ impl Device {
     ///
     /// Pages are merged rather than replacing the map wholesale, so a device
     /// that reports only some of them still updates the segments it did report.
-    /// Returns whether this taught us about segments we did not know of, which
-    /// means Home Assistant needs new entities.
+    ///
+    /// Returns whether the segment *count* moved, in either direction, because
+    /// either way Home Assistant's set of entities is now wrong. This used to
+    /// report only growth, on the reading that new entities are the thing that
+    /// needs announcing — and that made a correction downwards silent. A device
+    /// whose count had been inflated to sixty and then found its real eighteen
+    /// published nothing, so the retraction that should have followed never
+    /// ran and forty-two dead entities stayed put.
     pub fn set_segment_colors(&mut self, pages: &[NotifySegmentColors]) -> bool {
         if pages.is_empty() {
             return false;
@@ -265,7 +271,7 @@ impl Device {
         }
         self.last_segment_colors_update.replace(Utc::now());
 
-        self.segment_count() > known_before
+        self.segment_count() != known_before
     }
 
     /// Colour last reported for one segment.
@@ -1018,6 +1024,45 @@ mod test {
         let device = Device::new("H6127", "ce");
         assert_eq!(device.name(), "H6127_CE");
     }
+    /// A count that shrinks has to be announced too.
+    ///
+    /// Home Assistant is told to re-publish a device's configs when this
+    /// returns true, and that is what drives retraction. Reporting only growth
+    /// left a corrected count with no way to clean up after itself.
+    #[test]
+    fn a_segment_count_that_shrinks_is_still_news() {
+        use crate::ble::{NotifySegmentColors, SegmentColor};
+
+        let lit = SegmentColor {
+            brightness: 50,
+            r: 255,
+            g: 0,
+            b: 0,
+        };
+        let page = |page: u8| NotifySegmentColors {
+            page,
+            segments: [lit, lit, lit, SegmentColor::default()],
+        };
+
+        let mut device = Device::new("H6116", "AA:BB:CC:DD:EE:FF:00:04");
+
+        // Six pages of three: eighteen segments, and that is news.
+        let pages: Vec<_> = (1..=6).map(page).collect();
+        assert!(device.set_segment_colors(&pages));
+        assert_eq!(device.visible_segment_count(), Some(18));
+
+        // The device now answers only two pages. Six entities, and the twelve
+        // that are gone have to be retracted -- so this must be news as well.
+        let mut device = Device::new("H6116", "AA:BB:CC:DD:EE:FF:00:05");
+        device.set_remembered_segment_count(18);
+        assert_eq!(device.visible_segment_count(), Some(18));
+        assert!(
+            device.set_segment_colors(&[page(1), page(2)]),
+            "a count falling from eighteen to six is a change"
+        );
+        assert_eq!(device.visible_segment_count(), Some(6));
+    }
+
     /// A count that outgrew the command mask must not cost the device its
     /// controls.
     ///
