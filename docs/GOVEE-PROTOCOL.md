@@ -210,12 +210,33 @@ Observed in status replies. All checksums verify.
 | `AA 0F <n>` | one chainable device only |
 | `AA BA 01 00 64 64 64 …` | one device; three times 100 |
 
-Also not worked out: music mode, DIY modes, keep-alive, and **per-segment brightness**. The
-read frames report it and the app sets it, but three probes — brightness in byte 7, a `02`
-sub-command, brightness placed after the mask — did nothing or something else. The next attempt
-should start from a capture of the app's own traffic rather than from guesses. `AA A9 02 01 32`
-carries a value equal to the device's per-segment brightness and is the first non-guessed
-candidate to have turned up.
+Also not worked out: music mode, DIY modes and keep-alive.
+
+**Per-segment brightness is half solved**, and the halves are worth keeping apart.
+
+*Reading it is done.* The `AA A5` pages carry it as a percentage, per segment, independent of the
+master dimmer. Verified on three SKUs against screenshots of the Govee app taken at a known time:
+`0x4B` where the app said 75 %, `0x1F` where it said 31 %. Nothing more is needed there.
+
+*Writing it as a frame is not.* Three probes failed — brightness in byte 7, a `02` sub-command,
+brightness placed after the mask — and each did nothing or something else. Two things narrow it
+since:
+
+- **The colour write leaves brightness alone.** `33 05 15` sets `<r> <g> <b>` and the segment
+  keeps the brightness byte it had, so brightness is a separate command rather than a field of
+  this one.
+- **The app's brightness change is in the `05` family.** Driven over the cloud with the phone's
+  Bluetooth off, setting one segment's brightness produced the receipt `33 05 00` — the same
+  opcode as its colour change. So the command is a sibling of `33 05 15`, not something unrelated.
+
+A candidate recorded here earlier is **refuted**: `AA A9 02 01 32` carries a value that happened to
+equal the device's per-segment brightness, and `33 A9 02 01 <v>` turned out to be a working write —
+the device echoes the new value straight back. But the `AA A5` pages do not move when it does, so
+whatever that sets, it is not this.
+
+Note that per-segment brightness is not *missing* from the product: Govee's Platform API sets it,
+and that is where this fork sends it. What is missing is the frame, which is what a
+Bluetooth-only device would need.
 
 ## 7. The same frames over AWS IoT
 
