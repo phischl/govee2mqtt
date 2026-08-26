@@ -49,6 +49,11 @@ commit_preprocessors = [
 
   # dependabot craps out crlfs in its commit messages, unixify them
   { pattern = '\r\n?', replace = "\n" },
+
+  # Tooling trailers do not belong in a published changelog. Left in, they put
+  # a session URL on every release page.
+  { pattern = '(?m)^Co-Authored-By: Claude.*\n?', replace = "" },
+  { pattern = '(?m)^Claude-Session:.*\n?', replace = "" },
 ]
 # regex for parsing and grouping commits
 commit_parsers = [
