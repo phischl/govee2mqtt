@@ -77,6 +77,10 @@ segment. Both were fixed by reading what the devices already say.
   was bounded by the current count, so it did nothing precisely when it was needed; and a count
   that fell was not announced at all, on the reading that only *new* entities need publishing. A
   correction downwards now republishes and retracts, so it cleans up after itself.
+- **Invented segments are recognised and dropped.** Some devices answer every page they are asked
+  for, filling the ones they do not have with `ff`, and those groups are not all-zero so the
+  padding rule could not see them. Brightness is a percentage, so a group claiming 255 % is not
+  hardware. A strip reporting eighteen segments where it has fifteen now reports fifteen.
 - **A segment count can no longer cost a device its controls.** Some devices answer every page
   they are asked for, inventing segments past the ones they have, and discovery believed them: a
   Bluetooth-only strip with fifteen real segments climbed to sixty, passed what a command mask can

@@ -266,6 +266,21 @@ impl Device {
                 if *segment == SegmentColor::default() {
                     continue;
                 }
+                // Nor is a group whose brightness is not a percentage. Some
+                // devices answer *every* page they are asked for, filling the
+                // ones they do not have with `ff`: an H6116 with fifteen real
+                // segments answers page six with `ff 00 00 00 | ff 17 3b 80 |
+                // ff 00 00 00`, where the real pages carry 0x23 and 0x41. The
+                // padding rule cannot catch that — the groups are not zero —
+                // and believing it grew the count three per poll until the
+                // device could no longer be addressed at all.
+                //
+                // Brightness is a percentage, measured against the Govee app on
+                // three models, so 0x64 is the ceiling and 0xff is not a
+                // reading. This is what tells an invented page from a real one.
+                if segment.brightness > 100 {
+                    continue;
+                }
                 self.segment_colors.insert(first + n as u32, *segment);
             }
         }
@@ -1024,6 +1039,67 @@ mod test {
         let device = Device::new("H6127", "ce");
         assert_eq!(device.name(), "H6127_CE");
     }
+    /// A device that answers pages it does not have is caught by the
+    /// brightness byte.
+    ///
+    /// The exact frames an H6116 with fifteen segments sent on 2026-08-26. Its
+    /// five real pages carry brightnesses of 0x23 and 0x41; page six, which the
+    /// hardware does not have, comes back filled with 0xff. Brightness is a
+    /// percentage, so 0xff is not a reading — and that is the only thing
+    /// separating the two, since an invented group is not all-zero and so
+    /// slips past the padding rule.
+    #[test]
+    fn a_page_the_device_does_not_have_is_not_counted() {
+        use crate::ble::{NotifySegmentColors, SegmentColor};
+
+        let real = |brightness: u8| SegmentColor {
+            brightness,
+            r: 0,
+            g: 255,
+            b: 0,
+        };
+        let invented = SegmentColor {
+            brightness: 0xff,
+            r: 0x17,
+            g: 0x3b,
+            b: 0x80,
+        };
+
+        let mut device = Device::new("H6116", "AA:BB:CC:DD:EE:FF:00:07");
+        let mut pages: Vec<_> = (1..=5)
+            .map(|page| NotifySegmentColors {
+                page,
+                segments: [real(0x23), real(0x23), real(0x41), SegmentColor::default()],
+            })
+            .collect();
+        pages.push(NotifySegmentColors {
+            page: 6,
+            segments: [
+                SegmentColor {
+                    brightness: 0xff,
+                    r: 0,
+                    g: 0,
+                    b: 0,
+                },
+                invented,
+                SegmentColor {
+                    brightness: 0xff,
+                    r: 0,
+                    g: 0,
+                    b: 0,
+                },
+                SegmentColor::default(),
+            ],
+        });
+
+        device.set_segment_colors(&pages);
+        assert_eq!(
+            device.visible_segment_count(),
+            Some(15),
+            "five pages of three, and the sixth is not hardware"
+        );
+    }
+
     /// A count that shrinks has to be announced too.
     ///
     /// Home Assistant is told to re-publish a device's configs when this

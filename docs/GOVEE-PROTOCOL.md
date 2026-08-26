@@ -97,6 +97,20 @@ stride from a whole batch of pages, and keep the answer.
 **An all-zero group is padding, not a black segment.** A segment that is off keeps its
 brightness byte, so a group that is zero all through is past the end of the real list.
 
+**And a group whose brightness is not a percentage is not a segment at all.** Some devices answer
+*every* page they are asked for, filling the ones they do not have with `ff`. An H6116 with
+fifteen segments answers five pages carrying brightnesses like `23` and `41`, and then:
+
+```
+AA A5 06  FF 00 00 00  FF 17 3B 80  FF 00 00 00  00 00 00 00
+```
+
+`0xff` is 255, and brightness is a percentage — `0x64` is the ceiling. That is the only thing
+separating an invented group from a real one: it is not all-zero, so the padding rule cannot see
+it, and its colour bytes look like a plausible colour. Believing it is expensive: discovery asks
+one page past what it knows, so a device like this grows by three segments every poll until
+something stops it.
+
 Brightness here is a **percentage**, independent of the master dimmer: a lamp at 60 % overall
 reported 95 % per segment.
 
