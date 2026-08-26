@@ -81,6 +81,8 @@ yet do.
 
 * [Is my device supported?](docs/SKUS.md)
 * [Check out the FAQ](docs/FAQ.md)
+* [How do Govee devices actually talk?](docs/GOVEE-PROTOCOL.md) - the frame formats, the
+  segment commands, and what is still unknown
 
 ## Want to say thanks?
 
