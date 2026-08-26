@@ -507,6 +507,17 @@ async fn run_iot_subscriber(
                                                 segments_discovered |=
                                                     device.set_segment_mode_reported();
                                             }
+                                            GoveeBlePacket::NotifyChainedStrings(chained) => {
+                                                // How many strings are plugged
+                                                // together, which decides how
+                                                // many of the slots this device
+                                                // reports have bulbs on them.
+                                                // Plugging one in changes the
+                                                // entity count, so this counts
+                                                // as discovery too.
+                                                segments_discovered |= device
+                                                    .set_chained_strings(chained.strings.into());
+                                            }
                                             GoveeBlePacket::NotifySegmentColors(page) => {
                                                 // Collected rather than applied
                                                 // one at a time: the page

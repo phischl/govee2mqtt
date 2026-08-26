@@ -469,6 +469,17 @@ impl PacketManager {
 
         all_codecs.push(PacketCodec::new(
             &[GENERIC_LIGHT],
+            |value: &NotifyChainedStrings| Ok(finish(vec![0xaa, 0x0f, value.strings])),
+            |data| {
+                let body = notification_body(data, &[0xaa, 0x0f])?;
+                Ok(GoveeBlePacket::NotifyChainedStrings(NotifyChainedStrings {
+                    strings: body.first().copied().unwrap_or_default(),
+                }))
+            },
+        ));
+
+        all_codecs.push(PacketCodec::new(
+            &[GENERIC_LIGHT],
             |value: &NotifySegmentMode| Ok(finish(vec![0xaa, 0x05, SEGMENT_MODE, value.mode])),
             |data| {
                 let body = notification_body(data, &[0xaa, 0x05, SEGMENT_MODE])?;
@@ -784,6 +795,25 @@ pub struct NotifySegmentMode {
     pub mode: u8,
 }
 
+/// How many light strings are chained together.
+///
+/// Some products take a second string plugged into the first, and such a device
+/// exposes slots for the most it could ever drive rather than for what is
+/// attached: an H7020 reports thirty segments over `aa a5` and lights fifteen.
+/// This is the only thing on the wire that distinguishes the two.
+///
+/// Settled on 2026-08-26 by writing it. `33 0f 02` was accepted, the device
+/// answered `aa 0f 02`, nothing else in its status moved — the ten `aa a5`
+/// pages included — and the Govee app then drew thirty bulbs where it had drawn
+/// fifteen. Restored to `01` afterwards.
+///
+/// The *length* of one string is not on the wire; the app knows it from the
+/// product. See `quirks::segments_per_chained_string`.
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub struct NotifyChainedStrings {
+    pub strings: u8,
+}
+
 /// Where the segment bitmask starts in a `33 05 15 01` frame.
 pub const SEGMENT_MASK_AT: usize = 12;
 
@@ -1030,6 +1060,7 @@ pub enum GoveeBlePacket {
     NotifySegmentColors(NotifySegmentColors),
     SetSegmentColorRgb(SetSegmentColorRgb),
     SetSegmentBrightness(SetSegmentBrightness),
+    NotifyChainedStrings(NotifyChainedStrings),
     NotifySegmentMode(NotifySegmentMode),
     SetHumidifierNightlight(SetHumidifierNightlightParams),
     NotifyHumidifierMode(NotifyHumidifierMode),
@@ -1453,6 +1484,28 @@ a3 ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5c
             Base64HexBytes(HexBytes(decoded)).decode_for_sku(GENERIC_LIGHT),
             GoveeBlePacket::SetSegmentColorRgb(command)
         );
+    }
+
+    /// `aa 0f <n>` — how many light strings are chained together.
+    ///
+    /// The exact bytes an H7020 answered with, before and after being told it
+    /// had two strings. Nothing else in its status moved, and the Govee app
+    /// redrew fifteen bulbs as thirty.
+    #[test]
+    fn chained_string_count_round_trips() {
+        for (strings, expected) in [(1u8, "aa0f01"), (2, "aa0f02")] {
+            let value = NotifyChainedStrings { strings };
+            let encoded = Base64HexBytes::encode_for_sku(GENERIC_LIGHT, &value).unwrap();
+            assert!(
+                hex(&encoded).starts_with(expected),
+                "encoding {strings} strings"
+            );
+            round_trip(
+                GENERIC_LIGHT,
+                &value,
+                GoveeBlePacket::NotifyChainedStrings(value),
+            );
+        }
     }
 
     /// Per-segment brightness, from the Govee app's own Bluetooth traffic.

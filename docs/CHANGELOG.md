@@ -73,6 +73,12 @@ segment. Both were fixed by reading what the devices already say.
   string would have lost twelve silently.
 - **Segmented devices take colour over Bluetooth**, which they could not before — the whole-strip
   colour write does nothing on them.
+- **A chainable light string gets the segments it actually has.** A model that takes a second
+  string plugged into the first reports slots for the most it could ever drive — thirty on an
+  H7020, of which fifteen have bulbs — and both Govee's metadata and the device's own frames say
+  thirty. `aa 0f` says how many strings are attached, and with a per-model string length that
+  gives fifteen entities instead of thirty, or thirty again the moment a second string is
+  connected.
 - **Segments are discovered from the device**, not from Govee's metadata, which turns out to be
   unreliable in both directions: it claims fifteen segments for a two-spot lamp and omits twelve
   on another entirely. A device is mapped in one poll and the count is remembered across
@@ -130,10 +136,6 @@ segment. Both were fixed by reading what the devices already say.
 
 ## Known limits
 
-- A chainable light string still gets one segment entity per *possible* segment rather than per
-  connected one. An H7020 reports thirty slots and drives fifteen, so half its entities do
-  nothing. The device does say how many strings are attached — `AA 0F` — but not how long one is,
-  so closing this needs a per-model constant.
 - Colour temperature on a segmented device still goes to the cloud — there is no segment
   equivalent for it.
 - Base image signatures are not verified during the add-on build. The bundled cosign is too old

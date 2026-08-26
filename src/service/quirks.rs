@@ -162,6 +162,32 @@ impl Quirk {
     }
 }
 
+/// How many segments one chained light string carries, for products that take
+/// more than one.
+///
+/// A per-model constant because it genuinely is one: `aa 0f` tells us how many
+/// strings are attached, and nothing the device says tells us how long a string
+/// is. Govee's own app knows it from the product catalogue, and we watched the
+/// whole handshake to be sure — see `docs/GOVEE-PROTOCOL.md`.
+///
+/// A model that is not listed here keeps the old behaviour, which is to believe
+/// the slot count the device reports. That is right for everything that cannot
+/// be chained, since then the slots and the hardware agree.
+///
+/// This is deliberately not a field on [`Quirk`]. A `Quirk` entry carries a
+/// whole capability profile — `Quirk::light` would also declare colour
+/// temperature — and inventing one for the sake of a single number would change
+/// behaviour that has nothing to do with chaining.
+pub fn segments_per_chained_string(sku: &str) -> Option<u32> {
+    match sku {
+        // Fifteen bulbs per string, two strings possible, thirty slots always
+        // reported. Counted in the Govee app against a device that reported
+        // thirty and lit fifteen.
+        "H7020" => Some(15),
+        _ => None,
+    }
+}
+
 static QUIRKS: Lazy<HashMap<String, Quirk>> = Lazy::new(load_quirks);
 
 const STRIP: &str = "mdi:led-strip-variant";

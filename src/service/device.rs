@@ -53,6 +53,12 @@ pub struct Device {
     /// A segment count carried over from an earlier run. Discovery is otherwise
     /// forgotten on every restart, and the entities flap while it re-converges.
     pub remembered_segment_count: Option<u32>,
+    /// How many light strings are chained together, from `aa 0f`.
+    ///
+    /// Only products that take a second string report this, and it is the only
+    /// thing that distinguishes the slots a device *could* drive from the ones
+    /// it has bulbs on.
+    pub chained_strings: Option<u32>,
     pub last_segment_colors_update: Option<DateTime<Utc>>,
     /// How many segments this device packs into one `aa a5` page. Learned from
     /// the frames, then kept; see `set_segment_colors`.
@@ -813,11 +819,15 @@ impl Device {
     /// slot (`2a 5f 5f 5f`) that is not all-zero and so cannot be told from a
     /// real segment.
     ///
-    /// It does not fix every case. An H7020 reports thirty slots because a
-    /// second string of lights can be chained to it, and reports them whether
-    /// or not one is plugged in; both sources say thirty and nothing in the
-    /// frames distinguishes the two.
+    /// A chainable device answers outright and beats both. It reports slots for
+    /// the most it could ever drive — an H7020 says thirty whether one string is
+    /// plugged in or two — so the smaller-of-two rule cannot help there: both
+    /// sources say thirty. `aa 0f` says how many strings are attached, and that
+    /// times the per-model string length is the honest number.
     pub fn visible_segment_count(&self) -> Option<u32> {
+        if let Some(chained) = self.chained_segment_count() {
+            return Some(chained);
+        }
         match (self.reported_segment_count(), self.claimed_segment_count()) {
             (Some(a), Some(b)) => Some(a.min(b)),
             (only, None) | (None, only) => only,
@@ -842,6 +852,27 @@ impl Device {
     }
 
     /// Restore a segment count learned in an earlier run.
+    /// Record how many strings the device says are chained together.
+    ///
+    /// Returns whether this is news, because it changes how many segment
+    /// entities Home Assistant should have and those are published at startup.
+    pub fn set_chained_strings(&mut self, strings: u32) -> bool {
+        let changed = self.chained_strings != Some(strings);
+        self.chained_strings = Some(strings);
+        changed
+    }
+
+    /// How many segments this device drives, when that can be worked out.
+    ///
+    /// `aa 0f` says how many strings are attached and a per-model constant says
+    /// how long one is; neither alone is enough. `None` for everything that
+    /// cannot be chained, which is almost everything.
+    fn chained_segment_count(&self) -> Option<u32> {
+        let strings = self.chained_strings?;
+        let per_string = crate::service::quirks::segments_per_chained_string(&self.sku)?;
+        Some(strings * per_string)
+    }
+
     pub fn set_remembered_segment_count(&mut self, count: u32) {
         self.remembered_segment_count = Some(count);
     }
@@ -976,6 +1007,44 @@ mod test {
         let device = Device::new("H6127", "ce");
         assert_eq!(device.name(), "H6127_CE");
     }
+    /// A chainable string reports slots for what it *could* drive.
+    ///
+    /// Both of the usual sources say thirty for an H7020 with one string
+    /// attached, so the smaller-of-two rule cannot help. `aa 0f` is the only
+    /// thing that distinguishes the cases, and the per-model string length
+    /// turns it into a count. Verified against hardware and against what the
+    /// Govee app drew when the value was changed underneath it.
+    #[test]
+    fn a_chained_string_beats_the_slot_count() {
+        let mut device = Device::new("H7020", "AA:BB:CC:DD:EE:FF:00:01");
+        // Thirty slots, as the device reports them over `aa a5`.
+        device.set_remembered_segment_count(30);
+        assert_eq!(device.visible_segment_count(), Some(30));
+
+        // One string plugged in: fifteen bulbs.
+        assert!(device.set_chained_strings(1));
+        assert_eq!(device.visible_segment_count(), Some(15));
+
+        // A second string, and the phantoms become real.
+        assert!(device.set_chained_strings(2));
+        assert_eq!(device.visible_segment_count(), Some(30));
+
+        // Saying the same thing twice is not news, so it does not republish
+        // discovery configs.
+        assert!(!device.set_chained_strings(2));
+    }
+
+    /// The rule applies only to models that can be chained.
+    #[test]
+    fn a_string_count_alone_decides_nothing() {
+        let mut device = Device::new("H6072", "AA:BB:CC:DD:EE:FF:00:02");
+        device.set_remembered_segment_count(8);
+        // Even if such a device claimed a string count, we have no length for
+        // it, so the reported slots still win.
+        assert!(device.set_chained_strings(1));
+        assert_eq!(device.visible_segment_count(), Some(8));
+    }
+
     #[test]
     fn ble_address_is_derived_from_the_device_id() {
         // Verified against test-data/undoc-device-list.json, where the account
