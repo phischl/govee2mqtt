@@ -221,9 +221,27 @@ impl HassClient {
         state: &StateHandle,
     ) -> anyhow::Result<()> {
         let real = device.visible_segment_count().unwrap_or(0);
-        let Some(ever) = device.segment_count() else {
+        if device.segment_count().is_none() {
             return Ok(());
-        };
+        }
+        // Retract up to a fixed bound rather than up to today's count.
+        //
+        // The bound used to be `segment_count()`, which quietly made this a
+        // no-op in the one case that needs it most: a count that *shrinks*.
+        // A device whose discovery had inflated to sixty segments, then
+        // corrected itself to eighteen, satisfied `ever <= real` and left
+        // forty-two orphaned entities behind — the very entities the
+        // correction was supposed to clean up.
+        //
+        // Ninety-six covers anything any released version could have
+        // published: discovery has never been able to exceed
+        // `Query::MAX_DISCOVERY_PAGES` of thirty-two pages, three segments
+        // apiece. Publishing an empty payload to a topic that carries no
+        // retained message is a no-op on the broker, so the extra reach costs
+        // a handful of bytes and buys idempotence — which is what the comment
+        // above already promised and the old bound quietly took away.
+        const MOST_SEGMENTS_EVER_PUBLISHED: u32 = 96;
+        let ever = MOST_SEGMENTS_EVER_PUBLISHED;
         if ever <= real {
             return Ok(());
         }
