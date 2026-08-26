@@ -238,6 +238,12 @@ Note that per-segment brightness is not *missing* from the product: Govee's Plat
 and that is where this fork sends it. What is missing is the frame, which is what a
 Bluetooth-only device would need.
 
+The published reverse-engineering material does not have it either. Two well-known script
+collections between them use exactly five write opcodes — `33 01`, `33 04` and `33 05 0d`, all
+against a single non-segmented downlight. Segments do not appear at all. So the remaining route
+is a Bluetooth HCI log taken on a phone while the Govee app moves one segment's brightness
+slider.
+
 ## 7. The same frames over AWS IoT
 
 Govee's own app does not use the public Platform API. It uses an AWS IoT MQTT broker that
