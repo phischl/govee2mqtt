@@ -824,14 +824,21 @@ impl Device {
         }
     }
 
-    /// Segments the device itself has told us about, over `aa a5`, in this run
-    /// or an earlier one.
+    /// Segments the device itself has told us about, over `aa a5`.
+    ///
+    /// This run's answer wins outright where there is one, and the remembered
+    /// count only fills the gap before the device has spoken. It used to take
+    /// the larger of the two, which made sense while discovery grew a page per
+    /// poll; now that one poll maps a device completely, a current answer is
+    /// complete by construction and the larger would only keep a device that
+    /// has *shrunk* — rewired, or a different unit on the same id — inflated
+    /// until the remembered value expired.
     fn reported_segment_count(&self) -> Option<u32> {
-        let now = self.segment_colors.keys().max().map(|highest| highest + 1);
-        match (now, self.remembered_segment_count) {
-            (Some(a), Some(b)) => Some(a.max(b)),
-            (only, None) | (None, only) => only,
-        }
+        self.segment_colors
+            .keys()
+            .max()
+            .map(|highest| highest + 1)
+            .or(self.remembered_segment_count)
     }
 
     /// Restore a segment count learned in an earlier run.
@@ -1148,17 +1155,30 @@ mod test {
         assert!(device.is_segmented());
     }
 
-    /// A device that has grown since we last spoke keeps the larger answer.
+    /// What the device says now replaces what we remembered, in both
+    /// directions. A poll maps a device completely, so its current answer is
+    /// complete — and a device that has shrunk must not stay inflated until the
+    /// remembered value expires.
     #[test]
-    fn what_the_device_says_now_can_exceed_what_we_remembered() {
-        let mut device = Device::new("H6116", "7E:16:A4:C1:38:14:E6:5A");
-        device.set_remembered_segment_count(3);
-        device.set_segment_colors(&[
-            segment_page("aaa5015fff00005f00ff005fffff000000000051"),
-            segment_page("aaa5025f00ff005fff00ff5f00ff000000000052"),
-        ]);
+    fn what_the_device_says_now_replaces_what_we_remembered() {
+        let grown = {
+            let mut device = Device::new("H6116", "7E:16:A4:C1:38:14:E6:5A");
+            device.set_remembered_segment_count(3);
+            device.set_segment_colors(&[
+                segment_page("aaa5015fff00005f00ff005fffff000000000051"),
+                segment_page("aaa5025f00ff005fff00ff5f00ff000000000052"),
+            ]);
+            device
+        };
+        assert_eq!(grown.visible_segment_count(), Some(6));
 
-        assert_eq!(device.visible_segment_count(), Some(6));
+        let shrunk = {
+            let mut device = Device::new("H6116", "7E:16:A4:C1:38:14:E6:5A");
+            device.set_remembered_segment_count(12);
+            device.set_segment_colors(&[segment_page("aaa5015fff00005f00ff005fffff000000000051")]);
+            device
+        };
+        assert_eq!(shrunk.visible_segment_count(), Some(3), "not still twelve");
     }
 
     /// Govee's filler slot is not all-zero, so it survives the padding rule and
