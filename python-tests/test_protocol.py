@@ -186,3 +186,30 @@ def test_failed_response_omits_the_retry_hint_when_there_is_none():
     )
 
     assert "retry_after_ms" not in response.to_dict()["error"]
+
+
+def _query_request(**query_overrides):
+    query = {
+        "write_char": WRITE_CHAR,
+        "notify_char": NOTIFY_CHAR,
+        "data": base64.b64encode(b"\xaa\xa5\x01").decode(),
+    }
+    query.update(query_overrides)
+    return _request(ops=[{"query": query}])
+
+
+def test_a_query_is_not_optional_by_default():
+    """Silence keeps failing a job unless the caller says otherwise."""
+    job = parse_request(_query_request())
+
+    assert isinstance(job.ops[0], QueryOp)
+    assert job.ops[0].optional is False
+
+
+def test_a_query_can_be_marked_optional():
+    """Asking whether a device has segments is speculative: one that has none
+    ignores it, and that silence must not take the whole session down. It did
+    -- a working Bluetooth-only light was set aside on every poll."""
+    job = parse_request(_query_request(optional=True))
+
+    assert job.ops[0].optional is True

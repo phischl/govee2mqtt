@@ -70,6 +70,14 @@ class QueryOp:
     notify_char: str
     data: bytes
     timeout_ms: int = 5000
+    optional: bool = False
+    """Whether silence is an acceptable answer.
+
+    Some questions are only worth asking speculatively -- "do you have
+    segments?" is answered by a device that does, and ignored by one that does
+    not. Without this the silence fails the whole job, which took a working
+    Bluetooth-only light out of service every poll.
+    """
 
 
 Op = WriteOp | DelayOp | QueryOp
@@ -161,6 +169,7 @@ def _parse_op(raw: Any) -> Op:
             notify_char=_require(spec, "notify_char", str),
             data=_decode_data(_require(spec, "data", str)),
             timeout_ms=int(spec.get("timeout_ms", 5000)),
+            optional=bool(spec.get("optional", False)),
         )
 
     raise ProtocolError(f"unrecognised op: {sorted(raw)}")

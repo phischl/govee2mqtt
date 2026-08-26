@@ -342,6 +342,17 @@ impl Query {
     /// for more pages than this.
     const MAX_DISCOVERY_PAGES: u32 = 6;
 
+    /// Whether an unanswered query is an acceptable outcome.
+    ///
+    /// Only the segment pages are speculative: a device without segments
+    /// ignores the question, and treating that silence as a failed job took a
+    /// working Bluetooth-only light out of service on every poll. Power,
+    /// brightness and colour are answered by every light we talk to, so silence
+    /// there really is a fault.
+    fn is_speculative(&self) -> bool {
+        matches!(self, Self::Segments(_))
+    }
+
     /// Segment pages to ask for during a poll, given what we already know.
     ///
     /// A device with no segments simply does not answer, so probing page 1
@@ -436,6 +447,8 @@ pub struct BleScheduler {
     gate: Arc<Semaphore>,
     devices: Mutex<HashMap<String, DeviceQueue>>,
     breakers: Mutex<HashMap<String, Breaker>>,
+    /// Devices already asked, fruitlessly, whether they have segments.
+    probed_for_segments: Mutex<std::collections::HashSet<String>>,
 }
 
 impl BleScheduler {
@@ -446,6 +459,7 @@ impl BleScheduler {
             bridge,
             devices: Mutex::new(HashMap::new()),
             breakers: Mutex::new(HashMap::new()),
+            probed_for_segments: Mutex::new(Default::default()),
         }
     }
 
@@ -617,6 +631,25 @@ impl BleScheduler {
             .await
     }
 
+    /// Whether to ask a device about segments during this poll.
+    ///
+    /// A device that has segments is asked every time — the pages are its state
+    /// and we want them fresh. A device that has never mentioned any is asked
+    /// **once per run**, because an executor predating the `optional` flag on
+    /// queries treats the silence as a failed job: that opened the circuit
+    /// breaker on a working Bluetooth-only light every fifteen minutes until
+    /// this was found. One wasted poll per restart is an acceptable price for
+    /// discovery; a permanent one is not.
+    async fn may_probe_segments(&self, device_id: &str, known: Option<u32>) -> bool {
+        if known.is_some() {
+            return true;
+        }
+        self.probed_for_segments
+            .lock()
+            .await
+            .insert(device_id.to_string())
+    }
+
     /// Send frames a caller has already encoded, in one radio session.
     ///
     /// The scheduler's own path builds frames from `DeviceOp`s, which cover the
@@ -663,7 +696,9 @@ impl BleScheduler {
         known_segments: Option<u32>,
     ) -> anyhow::Result<()> {
         let mut queries = Query::ALL.to_vec();
-        queries.extend(Query::discover_segments(known_segments));
+        if self.may_probe_segments(device_id, known_segments).await {
+            queries.extend(Query::discover_segments(known_segments));
+        }
 
         let result = self
             .exchange(state, device_id, sku, address, &[], &queries, "poll")
@@ -714,6 +749,7 @@ impl BleScheduler {
                 notify_char: GOVEE_NOTIFY_CHAR,
                 data: String::from_utf8(query.frame()?)?,
                 timeout_ms: self.config.query_timeout.as_millis() as u64,
+                optional: query.is_speculative(),
             }));
         }
         anyhow::ensure!(!ops.is_empty(), "nothing to do");
@@ -966,6 +1002,22 @@ mod test {
         // Blue, and a mask naming all four segments.
         assert_eq!(&command[8..14], "0000ff");
         assert_eq!(&command[24..26], "0f");
+    }
+
+    /// A device that has segments is asked every poll; one that never mentions
+    /// any is asked once per run, so an executor that treats the silence as a
+    /// failure cannot set it aside forever.
+    #[tokio::test]
+    async fn an_unknown_device_is_probed_once_per_run() {
+        let scheduler = scheduler();
+
+        assert!(scheduler.may_probe_segments("light", None).await);
+        assert!(!scheduler.may_probe_segments("light", None).await);
+        assert!(!scheduler.may_probe_segments("light", None).await);
+
+        // Once it has told us it has some, we want them fresh every time.
+        assert!(scheduler.may_probe_segments("light", Some(8)).await);
+        assert!(scheduler.may_probe_segments("light", Some(8)).await);
     }
 
     /// A device with no segments simply does not answer, so probing one page

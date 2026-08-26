@@ -124,11 +124,16 @@ class BleSession:
             return {"kind": "write"}
 
         if isinstance(op, QueryOp):
-            return notify_result(await self._query(client, op))
+            reply = await self._query(client, op)
+            if reply is None:
+                # An optional query the device ignored. Reported as its own
+                # kind so the add-on can tell "no answer" from "not asked".
+                return {"kind": "unanswered"}
+            return notify_result(reply)
 
         raise SessionError(ErrorKind.BAD_REQUEST, f"unsupported op {type(op).__name__}")
 
-    async def _query(self, client: BleakClientWithServiceCache, op: QueryOp) -> bytes:
+    async def _query(self, client: BleakClientWithServiceCache, op: QueryOp) -> bytes | None:
         """Write a request and wait for the device to notify a reply.
 
         The notification has to be subscribed before the write goes out, and
@@ -148,6 +153,15 @@ class BleSession:
             async with asyncio.timeout(op.timeout_ms / 1000):
                 return await future
         except TimeoutError as err:
+            if op.optional:
+                # Silence is an answer here: the caller asked something the
+                # device may simply not implement.
+                _LOGGER.debug(
+                    "[%s] optional query went unanswered within %dms",
+                    self._address,
+                    op.timeout_ms,
+                )
+                return None
             raise SessionError(
                 ErrorKind.TIMEOUT,
                 f"no notification from {self._address} within {op.timeout_ms}ms",

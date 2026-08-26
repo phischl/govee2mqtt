@@ -137,6 +137,17 @@ pub struct QuerySpec {
     pub notify_char: &'static str,
     pub data: String,
     pub timeout_ms: u64,
+    /// Whether silence is an acceptable answer.
+    ///
+    /// A speculative question — "do you have segments?" — is answered by a
+    /// device that does and ignored by one that does not. Without this the
+    /// silence failed the whole job and the circuit breaker took a working
+    /// Bluetooth-only light out of service on every poll.
+    ///
+    /// Skipped when false so that an executor predating this field sees
+    /// exactly what it saw before.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub optional: bool,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -358,6 +369,7 @@ mod test {
                 notify_char: "notify-char",
                 data: "qgE=".to_string(),
                 timeout_ms: 5000,
+                optional: false,
             }),
         ];
 
