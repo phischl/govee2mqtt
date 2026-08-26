@@ -576,9 +576,14 @@ async fn run_iot_subscriber(
             }
             Event::Disconnected(reason) => {
                 log::warn!("IoT disconnected with reason {reason}");
+                // Polling consults this to fall through to another source: a
+                // publish to a broker we have lost succeeds locally and the
+                // answer simply never comes.
+                state.set_iot_connected(false);
             }
             Event::Connected(status) => {
                 log::info!("IoT (re)connected with status {status}");
+                state.set_iot_connected(true);
 
                 client
                     .subscribe(&acct.topic, mosquitto_rs::QoS::AtMostOnce)

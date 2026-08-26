@@ -190,3 +190,16 @@ configuration:
       acknowledged at all, so this read-back is the only confirmation that path
       offers. Raise it if a light briefly shows its previous state in Home
       Assistant after you change it.
+  poll_order:
+    name: Preferred order for reading device state
+    description: >-
+      Comma separated list deciding where a device's state is read from and in
+      what order, from "lan", "iot", "platform" and "ble". Like the transport
+      order, this promotes what you name and never removes the rest — every
+      entry is a fallback for the ones before it. The default is
+      "lan,iot,platform,ble", and the last entry is the point of it: when your
+      internet is down, both cloud paths stop answering and Bluetooth keeps
+      reporting whatever is in range of a proxy. Put "ble" first if you would
+      rather not depend on Govee's cloud at all, bearing in mind that a radio
+      poll is slower, holds a proxy connection slot, and reaches only nearby
+      devices.

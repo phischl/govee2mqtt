@@ -102,6 +102,7 @@ A single number would force those against each other.
 |`--poll-interval-platform`|`GOVEE_POLL_INTERVAL_PLATFORM=1800`|`poll_interval_platform`|Seconds between Platform API polls. Defaults to `--poll-interval`.|
 |`--poll-interval-ble`|`GOVEE_POLL_INTERVAL_BLE=900`|`poll_interval_ble`|Seconds between Bluetooth polls of Bluetooth-only devices. Defaults to `--poll-interval`.|
 |`--poll-after-control`|`GOVEE_POLL_AFTER_CONTROL=5`|`poll_after_control`|Seconds to wait after a command before reading the device back. Defaults to 5.|
+|`--poll-order`|`GOVEE_POLL_ORDER=ble,lan,iot,platform`|`poll_order`|Where a device's state is read from, and in what order, as a comma separated list of `lan`, `iot`, `platform` and `ble`. A priority prefix: it promotes what you name and never removes the rest. Defaults to `lan,iot,platform,ble`.|
 
 The poll loop runs at the shortest configured interval, bounded to between 5 and
 30 seconds, so a short interval is honoured rather than silently rounded up to a
@@ -137,6 +138,21 @@ nothing more. The read-back uses the same channel the device is reachable on, so
 for an IoT device it costs no Platform API quota. Bluetooth is exempt: a session
 already reads back the attributes it changed, and LAN is exempt because it
 verifies its own writes.
+
+**Your internet goes down.** Nothing to configure — this is what the default order is for.
+AWS IoT stops answering, the Platform API stops answering, and Bluetooth carries on for every
+device within reach of a proxy. The add-on notices the AWS IoT connection dropping rather than
+guessing: a publish to a broker that is gone succeeds locally and the reply simply never arrives,
+so the connection state is what decides, not whether a client was configured.
+
+Two honest caveats. Bluetooth only reaches what is near a proxy, so garden and outbuilding devices
+will go stale until the connection returns. And on the first poll round after an outage every
+unreachable device costs a failed radio session before its circuit breaker sets it aside for five
+minutes.
+
+**You would rather not depend on Govee's cloud at all.** Put `ble` first in `poll_order`. Expect
+it to be slower — a radio poll takes a second or two and holds one of a proxy's three connection
+slots, where an AWS IoT poll costs a single MQTT message and returns the whole device at once.
 
 **A device flickers about a minute after Home Assistant starts talking to it.**
 That is [known Govee firmware behaviour](https://github.com/wez/govee2mqtt/issues/250)

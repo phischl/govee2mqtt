@@ -33,6 +33,13 @@ pub struct State {
     segment_batcher: Arc<SegmentBatcher>,
     /// Optional configured transport priority prefix; see `service::transport`.
     transport_order: Mutex<Option<Vec<TransportId>>>,
+    /// Whether the AWS IoT connection is currently up.
+    ///
+    /// Publishing to a broker we have lost succeeds locally and the answer
+    /// simply never arrives, so "is the client configured" is not the same
+    /// question as "can we reach the device this way". Polling needs the
+    /// second one to fall through to another source during an outage.
+    iot_connected: std::sync::atomic::AtomicBool,
 }
 
 pub type StateHandle = Arc<State>;
@@ -178,6 +185,19 @@ impl State {
 
     pub async fn get_hass_client(&self) -> Option<HassClient> {
         self.hass_client.lock().await.clone()
+    }
+
+    /// Record the AWS IoT connection coming up or going away.
+    pub fn set_iot_connected(&self, connected: bool) {
+        self.iot_connected
+            .store(connected, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether AWS IoT can currently carry anything. False before the first
+    /// connection as well as after one is lost.
+    pub fn iot_is_connected(&self) -> bool {
+        self.iot_connected
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub async fn set_iot_client(&self, client: IotClient) {

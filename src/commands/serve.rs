@@ -8,7 +8,7 @@ use crate::service::device::{BleAddressSource, Device};
 use crate::service::hass::spawn_hass_integration;
 use crate::service::http::run_http_server;
 use crate::service::iot::start_iot_client;
-use crate::service::poll::PollIntervals;
+use crate::service::poll::{PollIntervals, PollSource};
 use crate::service::state::StateHandle;
 use crate::undoc_api::GoveeUndocumentedApi;
 use crate::version_info::govee_version;
@@ -111,23 +111,23 @@ async fn poll_via_ble(
     device: &Device,
     now: chrono::DateTime<Utc>,
     interval: chrono::Duration,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     let Some(scheduler) = state.get_ble_scheduler().await else {
-        return Ok(());
+        return Ok(false);
     };
     let Some(address) = scheduler.address_for(device) else {
-        return Ok(());
+        return Ok(false);
     };
 
     // Only lights have a command set we understand.
     if !matches!(device.device_type(), DeviceType::Light) {
-        return Ok(());
+        return Ok(false);
     }
 
     // An offline executor or an open circuit breaker means a poll would just
     // burn a connection attempt.
     if !scheduler.is_available_for(device).await {
-        return Ok(());
+        return Ok(false);
     }
 
     let due = match &device.last_polled {
@@ -135,7 +135,7 @@ async fn poll_via_ble(
         Some(last) => now - last > interval,
     };
     if !due {
-        return Ok(());
+        return Ok(false);
     }
 
     // Recorded before the attempt, so that an unreachable device is retried on
@@ -161,8 +161,9 @@ async fn poll_via_ble(
         .await
     {
         log::debug!("polling {device} over BLE failed: {err:#}");
+        return Ok(false);
     }
-    Ok(())
+    Ok(true)
 }
 
 async fn poll_single_device(
@@ -177,7 +178,8 @@ async fn poll_single_device(
         // only way their state ever reaches Home Assistant. Devices that also
         // have a cloud or LAN presence keep using those; their Bluetooth writes
         // are verified within the session that issued them.
-        return poll_via_ble(state, device, now, as_chrono(intervals.ble)).await;
+        poll_via_ble(state, device, now, as_chrono(intervals.ble)).await?;
+        return Ok(());
     }
 
     // Collect the device status via the LAN API, if possible.
@@ -236,22 +238,75 @@ async fn poll_single_device(
         return Ok(());
     }
 
-    // Don't interrogate via HTTP if we can use the LAN.
-    // If we have LAN and the device is stale, it is likely
-    // offline and there is little sense in burning up request
-    // quota to the platform API for it
-    if device.lan_device.is_some() && !needs_platform {
-        log::trace!("LAN-available device {device} needs a status update; it's likely offline.");
-        return Ok(());
+    refresh_from_first_available_source(state, device, intervals, needs_platform).await
+}
+
+/// Read a device's state from the first source that can currently serve it.
+///
+/// The order is configurable (`--poll-order`) and every source is a fallback
+/// for the ones before it. That is the point rather than a nicety: when the
+/// internet goes, AWS IoT and the Platform API both stop answering, and
+/// Bluetooth is what is left for whatever is in range of a proxy.
+///
+/// "Can currently serve it" is doing real work for AWS IoT. A publish to a
+/// broker we have lost succeeds locally and the answer simply never arrives, so
+/// the connection state has to be consulted rather than the client's existence.
+async fn refresh_from_first_available_source(
+    state: &StateHandle,
+    device: &Device,
+    intervals: &PollIntervals,
+    needs_platform: bool,
+) -> anyhow::Result<()> {
+    let mut last_error = None;
+
+    for source in &intervals.order {
+        match source {
+            // Already refreshed above on its own interval; listed so that the
+            // order reads completely and so naming it changes nothing.
+            PollSource::Lan => {}
+
+            PollSource::Iot => {
+                if needs_platform || !state.iot_is_connected() {
+                    continue;
+                }
+                match state.poll_iot_api(device).await {
+                    Ok(true) => return Ok(()),
+                    Ok(false) => {}
+                    Err(err) => last_error = Some(err),
+                }
+            }
+
+            PollSource::Platform => {
+                // Upstream's quota guard: a LAN-capable device that has gone
+                // quiet is probably switched off, and asking Govee about it
+                // spends a request to be told so.
+                if device.lan_device.is_some() && !needs_platform {
+                    log::trace!("{device} should answer on the LAN; it is probably offline");
+                    continue;
+                }
+                match state.poll_platform_api(device).await {
+                    Ok(true) => return Ok(()),
+                    Ok(false) => {}
+                    Err(err) => last_error = Some(err),
+                }
+            }
+
+            PollSource::Ble => {
+                // Zero interval: the staleness gate above has already decided
+                // that a refresh is due.
+                match poll_via_ble(state, device, Utc::now(), chrono::Duration::zero()).await {
+                    Ok(true) => return Ok(()),
+                    Ok(false) => {}
+                    Err(err) => last_error = Some(err),
+                }
+            }
+        }
     }
 
-    if !needs_platform && state.poll_iot_api(device).await? {
-        return Ok(());
+    match last_error {
+        Some(err) => Err(err),
+        None => Ok(()),
     }
-
-    state.poll_platform_api(device).await?;
-
-    Ok(())
 }
 
 async fn periodic_state_poll(state: StateHandle, intervals: PollIntervals) -> anyhow::Result<()> {
@@ -511,7 +566,7 @@ impl ServeCommand {
             log::info!("Poll intervals: {}", intervals.describe());
             // Also published process-wide: the diagnostic sensor decides what
             // counts as stale from these, and it is nowhere near this call.
-            intervals.install();
+            intervals.clone().install();
             let state = state.clone();
             tokio::spawn(async move {
                 if let Err(err) = periodic_state_poll(state, intervals).await {

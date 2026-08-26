@@ -114,6 +114,10 @@ for interval in poll_interval poll_interval_lan poll_interval_iot \
   fi
 done
 
+if bashio::config.has_value poll_order ; then
+  export GOVEE_POLL_ORDER="$(bashio::config poll_order)"
+fi
+
 if bashio::config.has_value temperature_scale ; then
   export GOVEE_TEMPERATURE_SCALE="$(bashio::config temperature_scale)"
 fi

@@ -31,6 +31,47 @@ pub const MIN_TICK: Duration = Duration::from_secs(5);
 /// promptly even when every interval is long.
 pub const MAX_TICK: Duration = Duration::from_secs(30);
 
+/// Where a device's state may be read from.
+///
+/// Separate from `TransportId`, which is about *sending* commands: the sets
+/// overlap but the questions differ — a nightlight is a way to write and never
+/// a way to read.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PollSource {
+    /// The device's own network presence. Local and free.
+    Lan,
+    /// Govee's undocumented AWS IoT channel. One request returns the whole
+    /// device, so this is the fastest and cheapest of the three remote ones.
+    Iot,
+    /// Govee's official API. Costs a share of a daily quota.
+    Platform,
+    /// Over the radio, through the executor integration. Slow, occupies a proxy
+    /// connection slot, and only reaches what is in range — but it is the only
+    /// one that keeps working when the internet does not.
+    Ble,
+}
+
+impl std::fmt::Display for PollSource {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let name = match self {
+            Self::Lan => "lan",
+            Self::Iot => "iot",
+            Self::Platform => "platform",
+            Self::Ble => "ble",
+        };
+        fmt.write_str(name)
+    }
+}
+
+/// Cloud first because it is faster and costs no radio time; Bluetooth last so
+/// that it is what remains when the internet is gone.
+pub const DEFAULT_POLL_ORDER: [PollSource; 4] = [
+    PollSource::Lan,
+    PollSource::Iot,
+    PollSource::Platform,
+    PollSource::Ble,
+];
+
 #[derive(clap::Parser, Debug, Default)]
 pub struct PollArguments {
     /// How many seconds a device's state may be stale before it is polled
@@ -67,6 +108,18 @@ pub struct PollArguments {
     #[arg(long, global = true, value_name = "SECONDS")]
     poll_interval_ble: Option<u64>,
 
+    /// Which sources a device's state may be read from, and in what order, as
+    /// a comma separated list of `lan`, `iot`, `platform` and `ble`.
+    ///
+    /// A priority prefix, like --transport-order: sources named here come
+    /// first, the rest follow in their default order, and a source a device
+    /// does not support is skipped either way. The point of the default is the
+    /// last entry — when the internet is gone, AWS IoT and the Platform API
+    /// both fail and Bluetooth carries on for whatever is in range of a proxy.
+    /// You may also set this via the GOVEE_POLL_ORDER environment variable.
+    #[arg(long, global = true, value_delimiter = ',')]
+    poll_order: Vec<PollSource>,
+
     /// Seconds to wait after a command before reading the device back. Raise it
     /// if a device reports its previous state right after being told to change.
     /// Default 5.
@@ -76,6 +129,28 @@ pub struct PollArguments {
 }
 
 impl PollArguments {
+    /// The configured source order, resolved against the default.
+    pub fn order(&self) -> anyhow::Result<Vec<PollSource>> {
+        let mut prefix = self.poll_order.clone();
+
+        if prefix.is_empty() {
+            if let Some(spec) = crate::opt_env_var::<String>("GOVEE_POLL_ORDER")? {
+                for name in spec.split(',') {
+                    let name = name.trim();
+                    if name.is_empty() {
+                        continue;
+                    }
+                    prefix.push(
+                        <PollSource as clap::ValueEnum>::from_str(name, true)
+                            .map_err(|err| anyhow::anyhow!("GOVEE_POLL_ORDER: {err}"))?,
+                    );
+                }
+            }
+        }
+
+        Ok(resolve_order(&prefix))
+    }
+
     pub fn intervals(&self) -> anyhow::Result<PollIntervals> {
         let general =
             resolve(self.poll_interval, "GOVEE_POLL_INTERVAL")?.unwrap_or(DEFAULT_INTERVAL);
@@ -89,6 +164,7 @@ impl PollArguments {
             ble: resolve(self.poll_interval_ble, "GOVEE_POLL_INTERVAL_BLE")?.unwrap_or(general),
             after_control: resolve(self.poll_after_control, "GOVEE_POLL_AFTER_CONTROL")?
                 .unwrap_or(DEFAULT_AFTER_CONTROL_DELAY),
+            order: self.order()?,
         })
     }
 }
@@ -114,7 +190,7 @@ fn resolve(flag: Option<u64>, var: &str) -> anyhow::Result<Option<Duration>> {
 /// point where configuration is read needs to know how stale is too stale.
 static CONFIGURED: OnceCell<PollIntervals> = OnceCell::new();
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct PollIntervals {
     pub lan: Duration,
     pub iot: Duration,
@@ -123,6 +199,8 @@ pub struct PollIntervals {
     /// Not an interval but a one-off delay; it lives here because it is the
     /// same question — how long before we believe a device about its state.
     pub after_control: Duration,
+    /// Which sources to read a device's state from, in order.
+    pub order: Vec<PollSource>,
 }
 
 impl Default for PollIntervals {
@@ -133,6 +211,7 @@ impl Default for PollIntervals {
             platform: DEFAULT_INTERVAL,
             ble: DEFAULT_INTERVAL,
             after_control: DEFAULT_AFTER_CONTROL_DELAY,
+            order: DEFAULT_POLL_ORDER.to_vec(),
         }
     }
 }
@@ -145,7 +224,7 @@ impl PollIntervals {
 
     /// What was installed at startup, or the defaults before that has happened.
     pub fn configured() -> Self {
-        CONFIGURED.get().copied().unwrap_or_default()
+        CONFIGURED.get().cloned().unwrap_or_default()
     }
 
     /// How old a device's state may be before we call it missing rather than
@@ -186,13 +265,75 @@ impl PollIntervals {
             self.ble.as_secs(),
             self.after_control.as_secs(),
             self.tick().as_secs()
+        ) + &format!(
+            " order={}",
+            self.order
+                .iter()
+                .map(|source| source.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
         )
     }
+}
+
+/// Put the named sources first and let the rest follow in their default order.
+///
+/// Naming one source does not disable the others: the point of the list is
+/// which to *prefer*, and dropping a fallback silently would take away the
+/// thing that keeps polling alive during an outage.
+fn resolve_order(prefix: &[PollSource]) -> Vec<PollSource> {
+    let mut order: Vec<PollSource> = vec![];
+    for source in prefix {
+        if !order.contains(source) {
+            order.push(*source);
+        }
+    }
+    for source in DEFAULT_POLL_ORDER {
+        if !order.contains(&source) {
+            order.push(source);
+        }
+    }
+    order
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
+
+    /// Naming a source promotes it; it never removes the others. Dropping a
+    /// fallback silently would take away the thing that keeps polling alive
+    /// when the internet is gone.
+    #[test]
+    fn naming_a_source_promotes_it_without_disabling_the_rest() {
+        assert_eq!(
+            resolve_order(&[PollSource::Ble]),
+            vec![
+                PollSource::Ble,
+                PollSource::Lan,
+                PollSource::Iot,
+                PollSource::Platform
+            ]
+        );
+
+        // Repeats collapse, and the unnamed keep their relative order.
+        assert_eq!(
+            resolve_order(&[PollSource::Platform, PollSource::Platform]),
+            vec![
+                PollSource::Platform,
+                PollSource::Lan,
+                PollSource::Iot,
+                PollSource::Ble
+            ]
+        );
+    }
+
+    /// Bluetooth is last by default, which is the whole point of the default:
+    /// it is what remains when the two cloud sources stop answering.
+    #[test]
+    fn the_default_keeps_bluetooth_as_the_last_resort() {
+        assert_eq!(resolve_order(&[]), DEFAULT_POLL_ORDER.to_vec());
+        assert_eq!(*DEFAULT_POLL_ORDER.last().unwrap(), PollSource::Ble);
+    }
 
     #[test]
     fn the_tick_follows_the_shortest_interval() {
