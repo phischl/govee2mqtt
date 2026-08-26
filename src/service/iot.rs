@@ -499,6 +499,14 @@ async fn run_iot_subscriber(
                                                     mode, param,
                                                 );
                                             }
+                                            GoveeBlePacket::NotifySegmentMode(_) => {
+                                                // The device naming itself as
+                                                // segmented. Worth an entity
+                                                // refresh the first time, since
+                                                // it may change what we offer.
+                                                segments_discovered |=
+                                                    device.set_segment_mode_reported();
+                                            }
                                             GoveeBlePacket::NotifySegmentColors(page) => {
                                                 // Collected rather than applied
                                                 // one at a time: the page

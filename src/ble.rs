@@ -322,6 +322,15 @@ impl PacketManager {
                     "colour notification is too short: {} bytes",
                     body.len()
                 );
+                // `aa 05 15` is the segment family, not a colour. It fits this
+                // layout well enough to be mistaken for one — an H6072's
+                // `aa 05 15 01` decoded as colour rgb(1,0,0), which over
+                // Bluetooth would have been written into the device's state as
+                // near-black.
+                anyhow::ensure!(
+                    body[0] != SEGMENT_MODE,
+                    "{SEGMENT_MODE:#04x} is the segment mode, not a colour"
+                );
                 Ok(GoveeBlePacket::NotifyDeviceColor(NotifyDeviceColor {
                     mode: body[0],
                     r: body[1],
@@ -411,6 +420,17 @@ impl PacketManager {
                 Ok(GoveeBlePacket::NotifySegmentColors(NotifySegmentColors {
                     page,
                     segments,
+                }))
+            },
+        ));
+
+        all_codecs.push(PacketCodec::new(
+            &[GENERIC_LIGHT],
+            |value: &NotifySegmentMode| Ok(finish(vec![0xaa, 0x05, SEGMENT_MODE, value.mode])),
+            |data| {
+                let body = notification_body(data, &[0xaa, 0x05, SEGMENT_MODE])?;
+                Ok(GoveeBlePacket::NotifySegmentMode(NotifySegmentMode {
+                    mode: body.first().copied().unwrap_or_default(),
                 }))
             },
         ));
@@ -702,6 +722,25 @@ pub struct NotifyDeviceColor {
     pub kelvin: OptionalKelvin,
 }
 
+/// The `05 15` family: segment colour when written, and a marker in a status
+/// report that the device is addressed as segments at all.
+pub const SEGMENT_MODE: u8 = 0x15;
+
+/// A device saying it has segments.
+///
+/// Observed in the status of every segmented device on one account — H7020,
+/// H6072, H6054, H60B2, H7093 — and in none of the unsegmented ones. That makes
+/// it a better answer to "does this have segments?" than Govee's metadata,
+/// which omits it for an H6054 entirely, and better than a model list, which
+/// this project has already watched go stale once (§3.1).
+///
+/// The payload byte is `00` on some devices and `01` on others with no pattern
+/// we can see, so it is carried but not interpreted.
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub struct NotifySegmentMode {
+    pub mode: u8,
+}
+
 /// Where the segment bitmask starts in a `33 05 15 01` frame.
 pub const SEGMENT_MASK_AT: usize = 12;
 
@@ -894,6 +933,7 @@ pub enum GoveeBlePacket {
     NotifyDeviceColor(NotifyDeviceColor),
     NotifySegmentColors(NotifySegmentColors),
     SetSegmentColorRgb(SetSegmentColorRgb),
+    NotifySegmentMode(NotifySegmentMode),
     SetHumidifierNightlight(SetHumidifierNightlightParams),
     NotifyHumidifierMode(NotifyHumidifierMode),
     SetHumidifierMode(SetHumidifierMode),
@@ -1302,6 +1342,44 @@ a3 ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5c
                 GoveeBlePacket::SetSegmentColorRgb(value),
             );
         }
+    }
+
+    /// Verbatim from an H6072 and an H60B2. Before the guard, the first of
+    /// these decoded as a colour of rgb(1, 0, 0) — which the Bluetooth path
+    /// would have written into the device state as near-black.
+    #[test]
+    fn the_segment_marker_is_not_mistaken_for_a_colour() {
+        for (frame, mode) in [("aa051501", 1u8), ("aa051500", 0)] {
+            let bytes = Base64HexBytes::with_bytes(
+                (0..frame.len())
+                    .step_by(2)
+                    .map(|n| u8::from_str_radix(&frame[n..n + 2], 16).unwrap())
+                    .collect(),
+            );
+
+            assert_eq!(
+                MGR.decode_for_sku(GENERIC_LIGHT, &bytes.0 .0),
+                GoveeBlePacket::NotifySegmentMode(NotifySegmentMode { mode }),
+                "decoding {frame}"
+            );
+        }
+    }
+
+    /// And an ordinary colour report still decodes as one.
+    #[test]
+    fn a_colour_report_still_decodes_as_a_colour() {
+        let bytes = Base64HexBytes::with_bytes(vec![0xaa, 0x05, 0x0d, 0x00, 0x00, 0xff]);
+
+        assert_eq!(
+            MGR.decode_for_sku(GENERIC_LIGHT, &bytes.0 .0),
+            GoveeBlePacket::NotifyDeviceColor(NotifyDeviceColor {
+                mode: 0x0d,
+                r: 0,
+                g: 0,
+                b: 0xff,
+                kelvin: OptionalKelvin(0),
+            })
+        );
     }
 
     /// The exact bytes an H6072 answered.

@@ -47,6 +47,9 @@ pub struct Device {
     /// undocumented AWS IoT channel reports these, and only in reply to a
     /// status request, so they refresh on the poll interval rather than live.
     pub segment_colors: HashMap<u32, SegmentColor>,
+    /// Whether the device has sent `aa 05 15`, which every segmented device on
+    /// the author's account does and no other device does.
+    pub segment_mode_reported: bool,
     pub last_segment_colors_update: Option<DateTime<Utc>>,
     /// How many segments this device packs into one `aa a5` page. Learned from
     /// the frames, then kept; see `set_segment_colors`.
@@ -844,10 +847,22 @@ impl Device {
     /// gap that leaves: a Bluetooth-only segmented device has no Platform data
     /// to read this from, and will still be offered colour it cannot apply.
     pub fn is_segmented(&self) -> bool {
+        // The device's own word first. Govee's metadata misses this entirely
+        // for an H6054 — twelve segments it never mentions — and a
+        // Bluetooth-only device has no metadata at all.
+        if self.segment_mode_reported || !self.segment_colors.is_empty() {
+            return true;
+        }
+
         self.http_device_info
             .as_ref()
             .and_then(|info| info.supports_segmented_rgb())
             .is_some()
+    }
+
+    /// Record that a device named itself as segmented (`aa 05 15`).
+    pub fn set_segment_mode_reported(&mut self) -> bool {
+        !std::mem::replace(&mut self.segment_mode_reported, true)
     }
 
     /// Whether this device is a light we can only reach over Bluetooth.

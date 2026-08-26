@@ -323,6 +323,13 @@ impl PendingOps {
     }
 }
 
+/// How long to wait for an answer to a question the device may not implement.
+///
+/// Well under the ordinary query timeout: a device that has segments replies
+/// almost at once, so the wait only ever costs anything when the answer is
+/// silence.
+const SPECULATIVE_QUERY_TIMEOUT: Duration = Duration::from_millis(2000);
+
 /// A status attribute we can ask a device about.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Query {
@@ -351,6 +358,22 @@ impl Query {
     /// there really is a fault.
     fn is_speculative(&self) -> bool {
         matches!(self, Self::Segments(_))
+    }
+
+    /// How long to wait for an answer.
+    ///
+    /// A speculative query gets a shorter deadline than the configured one: a
+    /// device that has segments answers in milliseconds, so the full timeout is
+    /// spent waiting only on silence. Measured before this, a poll of a
+    /// segmentless Bluetooth-only light took 6.8 s where the same poll without
+    /// the question took 1.3 s — five seconds of a proxy connection slot held
+    /// for nothing.
+    fn timeout(&self, configured: Duration) -> Duration {
+        if self.is_speculative() {
+            SPECULATIVE_QUERY_TIMEOUT.min(configured)
+        } else {
+            configured
+        }
     }
 
     /// Segment pages to ask for during a poll, given what we already know.
@@ -748,7 +771,7 @@ impl BleScheduler {
                 write_char: GOVEE_WRITE_CHAR,
                 notify_char: GOVEE_NOTIFY_CHAR,
                 data: String::from_utf8(query.frame()?)?,
-                timeout_ms: self.config.query_timeout.as_millis() as u64,
+                timeout_ms: query.timeout(self.config.query_timeout).as_millis() as u64,
                 optional: query.is_speculative(),
             }));
         }
@@ -869,6 +892,9 @@ impl BleScheduler {
                         status.color_temperature_kelvin =
                             color.kelvin.get().map(u32::from).unwrap_or(0);
                     });
+                }
+                GoveeBlePacket::NotifySegmentMode(_) => {
+                    changed |= device.set_segment_mode_reported();
                 }
                 GoveeBlePacket::NotifySegmentColors(page) => {
                     segment_pages.push(page);
@@ -1018,6 +1044,23 @@ mod test {
         // Once it has told us it has some, we want them fresh every time.
         assert!(scheduler.may_probe_segments("light", Some(8)).await);
         assert!(scheduler.may_probe_segments("light", Some(8)).await);
+    }
+
+    /// The full timeout is only ever spent waiting on silence, so a
+    /// speculative question gets a shorter one.
+    #[test]
+    fn a_speculative_query_waits_less() {
+        let configured = Duration::from_secs(5);
+
+        assert_eq!(Query::Power.timeout(configured), configured);
+        assert_eq!(
+            Query::Segments(1).timeout(configured),
+            SPECULATIVE_QUERY_TIMEOUT
+        );
+
+        // Never longer than what the operator configured, though.
+        let strict = Duration::from_millis(500);
+        assert_eq!(Query::Segments(1).timeout(strict), strict);
     }
 
     /// A device with no segments simply does not answer, so probing one page
