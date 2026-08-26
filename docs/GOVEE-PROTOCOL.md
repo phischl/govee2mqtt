@@ -122,6 +122,26 @@ One refuted hypothesis worth keeping, because it looked principled: `33 A5 <page
 the read frame the way `33 01`/`AA 01` and `33 05 0d`/`AA 05 0d` do. The device ignored it
 silently, both switched off and switched on.
 
+**This frame is not universal.** Measured 2026-08-26 on an H6054 — two light bars of six,
+twelve segments, reading confirmed against what a person was looking at. It **acknowledged** both
+`ptReal` messages on the account topic and then reported, eight seconds later, that nothing had
+changed. Nothing changed on the hardware either.
+
+The obvious explanation is ruled out: the H6054 reports `AA 05 15 01`, the same marker byte as
+the H6072 where the command demonstrably works. So it is not the mode byte.
+
+What is different about this device is that it is the only one here that sends `AA A9`, and the
+only one built from two physically separate bars:
+
+```
+AA A9 00  06  01 10 03  01 10 03      six, then twice a three-byte group
+AA A9 02  01 32                       0x32 = 50, exactly its per-segment brightness
+```
+
+`06` with two repeats fits "six per unit, two units" for a twelve-segment two-bar device, so
+`A9` looks like a layout or addressing descriptor and `33 A9 …` is the natural next guess. That
+is a hypothesis from one device; it has not been tried.
+
 ### `AA 05 15` means "I have segments"
 
 Present in the status of every segmented device on one account and in none of the others. It is
@@ -179,13 +199,18 @@ Observed in status replies. All checksums verify.
 | `AA 12 FF 64 00 00 80 <n> …` | several; last byte differs per device |
 | `AA 23 FF <00 00 00 80> × 4` | several |
 | `AA 41 <n>` | some segmented devices, values `01` and `02` |
+| `AA A9 …` | one two-bar device only; see the segment-write section |
+| `AA 33 11` | the same device |
+| `AA 54` | the same device, as an unsolicited `ptReal` |
 | `AA 0F <n>` | one chainable device only |
 | `AA BA 01 00 64 64 64 …` | one device; three times 100 |
 
 Also not worked out: music mode, DIY modes, keep-alive, and **per-segment brightness**. The
 read frames report it and the app sets it, but three probes — brightness in byte 7, a `02`
 sub-command, brightness placed after the mask — did nothing or something else. The next attempt
-should start from a capture of the app's own traffic rather than from guesses.
+should start from a capture of the app's own traffic rather than from guesses. `AA A9 02 01 32`
+carries a value equal to the device's per-segment brightness and is the first non-guessed
+candidate to have turned up.
 
 ## 7. The same frames over AWS IoT
 
