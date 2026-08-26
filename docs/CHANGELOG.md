@@ -68,9 +68,13 @@ segment. Both were fixed by reading what the devices already say.
   `light.turn_on` went out as four separate messages two seconds apart. The lock now belongs to
   the batch rather than to each arriving command, which also collapses the read-back — twelve
   segments cost one status request instead of twelve.
-- **Segment discovery no longer truncates.** It stopped at eighteen segments, and a device that
-  reported exactly eighteen could not be told from one that had been cut off. A thirty-slot
-  string would have lost twelve silently.
+- **A segment count can no longer cost a device its controls.** Some devices answer every page
+  they are asked for, inventing segments past the ones they have, and discovery believed them: a
+  Bluetooth-only strip with fifteen real segments climbed to sixty, passed what a command mask can
+  address, and stopped being controllable at all — Bluetooth was its only transport, so nothing
+  could take over. The mask count is capped at what a frame can name, and discovery is bounded
+  well below it. Telling an invented page from a real one is still unsolved; a device like that
+  reports eighteen where it has fifteen.
 - **Segmented devices take colour over Bluetooth**, which they could not before — the whole-strip
   colour write does nothing on them.
 - **A chainable light string gets the segments it actually has.** A model that takes a second

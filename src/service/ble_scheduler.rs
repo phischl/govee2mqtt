@@ -353,14 +353,25 @@ impl Query {
     /// does not answer, so naming forty pages costs a three-segment lamp
     /// exactly what naming six did — the pages it has, plus one timeout.
     ///
-    /// It has to be generous, because a device that answers *every* page it was
-    /// asked for is indistinguishable from one that was cut off. This was set
-    /// to 6 — eighteen segments — and a Bluetooth-only H6116 duly reported
-    /// eighteen, exactly the ceiling, which tells us nothing about what it
-    /// really has. An H7020 has thirty slots and would have been truncated to
-    /// eighteen with no sign that anything was missing. So the bound must sit
-    /// past any plausible device rather than at a comfortable-looking number.
-    const MAX_DISCOVERY_PAGES: u32 = 32;
+    /// **It cannot be generous, and finding out cost a working device.** The
+    /// reasoning above was that a ceiling a real device can reach is
+    /// indistinguishable from a truncation, so it should sit past any plausible
+    /// hardware. That is true as far as it goes. What it missed is that some
+    /// devices answer *every* page they are asked for, inventing segments
+    /// beyond the ones they have — and the ceiling was the only thing bounding
+    /// them.
+    ///
+    /// Raised from 6 to 32 on 2026-08-26, a Bluetooth-only H6116 with fifteen
+    /// real segments climbed three per poll: eighteen, then twenty-one, then
+    /// sixty. At sixty it passed `SEGMENT_MASK_BYTES * 8`, the colour command
+    /// could no longer be encoded, and since the device has no other transport
+    /// it stopped being controllable from Home Assistant at all.
+    ///
+    /// So this is back where it was. Eighteen is still wrong for a
+    /// fifteen-segment strip, but it is wrong in a way that leaves the device
+    /// working, and the real fix — telling an invented page from a real one —
+    /// needs the page bytes, which nobody has captured yet.
+    const MAX_DISCOVERY_PAGES: u32 = 6;
 
     /// Whether an unanswered query is an acceptable outcome.
     ///
@@ -1125,11 +1136,16 @@ mod test {
         // Eight need three pages, so reach for a fourth.
         assert_eq!(Query::discover_segments(Some(8)).len(), 4);
 
-        // The ceiling must not be reachable by a real device, or a count that
-        // hit it could not be told from one that was cut off. An H7020's
-        // thirty slots need ten pages; the old ceiling of six silently lost
-        // twelve of them.
-        assert!(Query::discover_segments(Some(30)).len() > 10);
+        // The ceiling bounds a device that answers every page it is asked.
+        // It has to stay below what a command mask can address, or an
+        // over-reporting device becomes uncontrollable rather than merely
+        // over-reported -- which is exactly what happened to an H6116.
+        let ceiling = Query::MAX_DISCOVERY_PAGES * SEGMENTS_PER_PAGE as u32;
+        assert!(
+            ceiling < (crate::ble::SEGMENT_MASK_BYTES * 8) as u32,
+            "discovery must not be able to outgrow the command mask"
+        );
+        assert_eq!(Query::discover_segments(Some(300)).len(), 6);
     }
 
     /// However many a device turns out to have, one poll stays bounded.

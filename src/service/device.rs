@@ -797,12 +797,23 @@ impl Device {
     /// the end reach nothing, while a count that is too small would leave
     /// segments untouched.
     ///
+    /// Capped at what a segment frame can actually address. A count beyond that
+    /// buys nothing — the bits do not exist — and left uncapped it is worse
+    /// than useless: `SetSegmentColorRgb::for_segments` refuses to encode a
+    /// segment it cannot name, so the whole command fails. On 2026-08-26 a
+    /// Bluetooth-only H6116 talked its way up to sixty segments and stopped
+    /// being controllable at all, because Bluetooth was its only transport and
+    /// nothing else could take over. Whatever else is wrong with a count, it
+    /// must not cost the device its controls.
+    ///
     /// This is not the number to show a user — see `visible_segment_count`.
     pub fn segment_count(&self) -> Option<u32> {
+        let addressable = (crate::ble::SEGMENT_MASK_BYTES * 8) as u32;
         match (self.reported_segment_count(), self.claimed_segment_count()) {
             (Some(a), Some(b)) => Some(a.max(b)),
             (only, None) | (None, only) => only,
         }
+        .map(|count| count.min(addressable))
     }
 
     /// How many segments to give Home Assistant entities for.
@@ -1007,6 +1018,29 @@ mod test {
         let device = Device::new("H6127", "ce");
         assert_eq!(device.name(), "H6127_CE");
     }
+    /// A count that outgrew the command mask must not cost the device its
+    /// controls.
+    ///
+    /// Segment discovery once inflated a Bluetooth-only H6116 to sixty
+    /// segments. Sixty is past the fifty-six a mask can name, so the colour
+    /// command would not encode, Bluetooth failed, and with no other transport
+    /// to fall back on the light became uncontrollable from Home Assistant.
+    /// Being wrong about the count is survivable; refusing to send anything is
+    /// not.
+    #[test]
+    fn an_inflated_count_cannot_outgrow_the_command_mask() {
+        let addressable = (crate::ble::SEGMENT_MASK_BYTES * 8) as u32;
+
+        let mut device = Device::new("H6116", "AA:BB:CC:DD:EE:FF:00:03");
+        device.set_remembered_segment_count(60);
+        assert_eq!(device.segment_count(), Some(addressable));
+
+        // And every segment it names can actually be encoded.
+        let count = device.segment_count().unwrap();
+        crate::ble::SetSegmentColorRgb::for_segments(0..count, (255, 0, 0))
+            .expect("a mask over every segment we claim must encode");
+    }
+
     /// A chainable string reports slots for what it *could* drive.
     ///
     /// Both of the usual sources say thirty for an H7020 with one string
