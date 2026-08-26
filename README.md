@@ -68,6 +68,9 @@ second add-on, so it installs through HACS and not through the Add-on Store.
 * `LAN` means that you have enabled the [Govee LAN API](https://app-h5.govee.com/user-manual/wlan-guide)
   on supported devices and that the LAN API protocol is functional on your network
 
+See [docs/CHANGELOG.md](docs/CHANGELOG.md) for what this fork changes, and what it does not
+yet do.
+
 ## Usage
 
 * [Installing the HASS Add-On](docs/ADDON.md) - for HAOS and Supervised HASS users
