@@ -408,9 +408,11 @@ impl PacketManager {
             },
             |data| {
                 let body = notification_body(data, &[0x33, 0x05, 0x15, 0x02])?;
+                // The percentage, then the mask.
+                let needed = SEGMENT_MASK_BYTES + 1;
                 anyhow::ensure!(
-                    body.len() >= 1 + SEGMENT_MASK_BYTES,
-                    "segment brightness command is too short: {} bytes",
+                    body.len() >= needed,
+                    "segment brightness command is too short: {} bytes, want {needed}",
                     body.len()
                 );
 
