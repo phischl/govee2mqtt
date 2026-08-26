@@ -250,23 +250,31 @@ Three traps:
 pages arrive only inside the answer to a `status` request. A capture taken after a colour change
 was byte-identical to the one before it.
 
-**There is a change *marker*, though.** Measured 2026-08-26: with the phone's Bluetooth switched
-off so the Govee app had to go through the cloud, changing one segment's colour and then its
-brightness produced exactly two messages on the account topic, one per action:
+**A write is acknowledged, and the acknowledgement names the opcode.** Measured 2026-08-26:
+every `33 <opcode> …` frame sent to a device over `ptReal` is followed on the account topic by
 
 ```
-cmd ptReal    33 05 00 00 00 … 00
+cmd ptReal    33 <opcode> 00 00 … 00
 ```
 
-Content-free — the payload is all zeros — and the app's actual command never appears, because it
-is published to the device's own topic. But the marker arrives at the moment segments change, so
-it can trigger an immediate re-read instead of waiting for the poll interval. Observed twice, on
-one SKU; whether every segmented device emits it is untested.
+The opcode survives; byte 2 and the whole payload are zeroed. Sending `33 05 0d …` produced
+`33 05 00`, and `33 A9 02 01 0A` produced `33 A9 00`, so this is a per-write receipt and not a
+notification about any particular subject.
+
+It says **received**, not **applied** — both of those frames were acknowledged and only one of
+them did anything. Its use is narrower but real: with a device the Govee app is driving, the
+receipt reveals which opcode family the app is using, even though the payload is stripped.
+
+*This paragraph replaces an earlier reading of the same frames as a "segment changed" marker.
+Two observations coincided with two segment changes in the app and that looked like a signal; the
+log then showed the same shape following writes of a completely different opcode, including ones
+that had nothing to do with segments. A correlation with two data points was not a finding.*
 
 **A capture over the cloud cannot recover the app's frames.** Worth knowing before anyone spends
 an afternoon on it as we did: forcing the app onto Wi-Fi makes it controllable and observable in
-its *effects*, but its commands go to a topic subscribing to which makes the broker drop the
-connection. Only an on-device Bluetooth HCI log will show what the app writes.
+its *effects*, and the receipt names its opcode, but the command itself goes to the device's own
+topic — and subscribing to that makes the broker drop the connection. Only an on-device Bluetooth
+HCI log will show the payload.
 
 **There are no rate-limit headers**, on this channel or the public one. A live request to
 `openapi.api.govee.com` returns only `date` and `content-type`, so quota use is not observable.
