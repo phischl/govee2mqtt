@@ -213,3 +213,18 @@ def test_a_query_can_be_marked_optional():
     job = parse_request(_query_request(optional=True))
 
     assert job.ops[0].optional is True
+
+
+def test_a_query_can_ask_to_stop_the_job_on_silence():
+    """Paged data: the first unanswered page says there are no more, so the
+    remaining questions would each cost a full timeout to learn nothing."""
+    job = parse_request(_query_request(optional=True, stop_if_unanswered=True))
+
+    assert job.ops[0].optional is True
+    assert job.ops[0].stop_if_unanswered is True
+
+
+def test_stopping_on_silence_is_off_by_default():
+    job = parse_request(_query_request())
+
+    assert job.ops[0].stop_if_unanswered is False

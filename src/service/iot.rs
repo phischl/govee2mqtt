@@ -557,6 +557,7 @@ async fn run_iot_subscriber(
                             // these re-read the device and would deadlock
                             // against it.
                             if segments_discovered {
+                                remember_segment_count(&state, device_id).await;
                                 log::info!(
                                     "{sku} {device_id} reported segments that Govee's metadata \
                                      did not; registering them with Home Assistant"
@@ -605,6 +606,24 @@ async fn run_iot_subscriber(
         }
     }
     Ok(())
+}
+
+/// Keep a device's segment count for the next run.
+///
+/// Discovery is otherwise forgotten on every restart, and for a device whose
+/// count comes only from its own frames the entities visibly flap while it
+/// re-converges.
+async fn remember_segment_count(state: &StateHandle, device_id: &str) {
+    let Some(device) = state.device_by_id(device_id).await else {
+        return;
+    };
+    let Some(count) = device.visible_segment_count() else {
+        return;
+    };
+
+    if let Err(err) = crate::cache::remember(&format!("segments/{device_id}"), &count) {
+        log::warn!("could not remember the segment count for {device_id}: {err:#}");
+    }
 }
 
 #[cfg(test)]

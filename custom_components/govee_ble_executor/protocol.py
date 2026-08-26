@@ -70,6 +70,15 @@ class QueryOp:
     notify_char: str
     data: bytes
     timeout_ms: int = 5000
+    stop_if_unanswered: bool = False
+    """Whether silence means the rest of the job is pointless.
+
+    Paged data answers this exactly: a device replies for the pages it has and
+    ignores the rest, so the first silence says there are no more. Without it,
+    asking six pages of a device with one costs five timeouts instead of one.
+    Only meaningful together with `optional`.
+    """
+
     optional: bool = False
     """Whether silence is an acceptable answer.
 
@@ -170,6 +179,7 @@ def _parse_op(raw: Any) -> Op:
             data=_decode_data(_require(spec, "data", str)),
             timeout_ms=int(spec.get("timeout_ms", 5000)),
             optional=bool(spec.get("optional", False)),
+            stop_if_unanswered=bool(spec.get("stop_if_unanswered", False)),
         )
 
     raise ProtocolError(f"unrecognised op: {sorted(raw)}")

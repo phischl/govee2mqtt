@@ -81,6 +81,30 @@ async fn report_ble_exclusions(state: &StateHandle, exclusions: &BleExclusions) 
     }
 }
 
+/// Restore segment counts learned in earlier runs.
+///
+/// Discovery lives in memory, so without this it starts from nothing after
+/// every restart. For a device whose count comes only from its own frames —
+/// every Bluetooth-only one, and an H6054 that Govee's API never mentions — the
+/// segment entities go unavailable and return over the following polls while it
+/// re-converges. Restoring the count skips all of that.
+async fn restore_remembered_segments(state: &StateHandle) {
+    for device in state.devices().await {
+        let Some(count) = crate::cache::recall::<u32>(&format!("segments/{}", device.id)) else {
+            continue;
+        };
+        if count == 0 {
+            continue;
+        }
+
+        log::info!("{device} had {count} segment(s) when we last spoke to it");
+        state
+            .device_mut(&device.sku, &device.id)
+            .await
+            .set_remembered_segment_count(count);
+    }
+}
+
 /// Read a Bluetooth-only device's state, if it is due and reachable.
 async fn poll_via_ble(
     state: &StateHandle,
@@ -502,6 +526,11 @@ impl ServeCommand {
             log::info!("Preferred transport order: {transport_order:?}");
             state.set_transport_order(Some(transport_order)).await;
         }
+
+        // Outside the Bluetooth block below on purpose: a segment count can be
+        // learned over AWS IoT just as well, and an H6054's only comes from
+        // there.
+        restore_remembered_segments(&state).await;
 
         // Set up before the MQTT loop starts: the loop registers routes for the
         // executor's topics only if a scheduler exists, and the retained status

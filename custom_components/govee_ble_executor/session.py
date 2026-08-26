@@ -102,7 +102,14 @@ class BleSession:
             results: list[dict[str, Any]] = []
             try:
                 for op in job.ops:
-                    results.append(await self._run_op(self._client, op))
+                    result = await self._run_op(self._client, op)
+                    results.append(result)
+                    if result["kind"] == "unanswered" and getattr(op, "stop_if_unanswered", False):
+                        # Paged data: the first silence says there are no more
+                        # pages, so the remaining questions would each cost a
+                        # full timeout to learn nothing.
+                        _LOGGER.debug("[%s] stopping after an unanswered query", self._address)
+                        break
             except SessionError:
                 # The link is suspect; drop it so the next job starts clean.
                 await self._disconnect_now()

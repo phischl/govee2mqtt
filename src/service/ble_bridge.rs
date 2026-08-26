@@ -148,6 +148,14 @@ pub struct QuerySpec {
     /// exactly what it saw before.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub optional: bool,
+    /// Whether silence means the rest of the job is pointless.
+    ///
+    /// Paged data answers this exactly: a device replies for the pages it has
+    /// and ignores the rest, so the first silence says there are no more.
+    /// Without it, asking six pages of a device with one costs five timeouts
+    /// instead of one.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub stop_if_unanswered: bool,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -370,6 +378,7 @@ mod test {
                 data: "qgE=".to_string(),
                 timeout_ms: 5000,
                 optional: false,
+                stop_if_unanswered: false,
             }),
         ];
 

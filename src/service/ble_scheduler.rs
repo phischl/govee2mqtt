@@ -387,9 +387,17 @@ impl Query {
     /// notify round trip per query, and the count converges in a few polls
     /// while `Device::segment_count` grows from the replies.
     fn discover_segments(known: Option<u32>) -> Vec<Query> {
-        let pages_known = known.map_or(0, |count| count.div_ceil(SEGMENTS_PER_PAGE as u32));
-        // One past the end, to find segments we have not seen yet.
-        let want = (pages_known + 1).min(Self::MAX_DISCOVERY_PAGES);
+        let want = match known {
+            // Nothing known: ask the lot. The executor stops at the first
+            // unanswered page, so this costs one timeout however many are
+            // asked for — and a device is fully mapped in a single poll
+            // instead of one page per fifteen minutes.
+            None => Self::MAX_DISCOVERY_PAGES,
+            // One past the end, in case it has grown.
+            Some(count) => {
+                (count.div_ceil(SEGMENTS_PER_PAGE as u32) + 1).min(Self::MAX_DISCOVERY_PAGES)
+            }
+        };
 
         (1..=want as u8).map(Query::Segments).collect()
     }
@@ -773,6 +781,8 @@ impl BleScheduler {
                 data: String::from_utf8(query.frame()?)?,
                 timeout_ms: query.timeout(self.config.query_timeout).as_millis() as u64,
                 optional: query.is_speculative(),
+                // Pages are contiguous, so the first silence ends the list.
+                stop_if_unanswered: query.is_speculative(),
             }));
         }
         anyhow::ensure!(!ops.is_empty(), "nothing to do");
@@ -919,6 +929,16 @@ impl BleScheduler {
         // Bluetooth-only device this is the only place that can ever be
         // learned — the Platform API does not describe such a device at all.
         if segments_discovered {
+            if let Some(count) = state
+                .device_by_id(device_id)
+                .await
+                .and_then(|device| device.visible_segment_count())
+            {
+                if let Err(err) = crate::cache::remember(&format!("segments/{device_id}"), &count) {
+                    log::warn!("could not remember the segment count for {device_id}: {err:#}");
+                }
+            }
+
             log::info!("{sku} {device_id} reported segments; registering them with Home Assistant");
             if let Err(err) = state.notify_of_entity_change(device_id).await {
                 log::error!("registering segments for {device_id}: {err:#}");
@@ -1063,12 +1083,17 @@ mod test {
         assert_eq!(Query::Segments(1).timeout(strict), strict);
     }
 
-    /// A device with no segments simply does not answer, so probing one page
-    /// is what lets a Bluetooth-only device — which the Platform API does not
-    /// describe at all — reveal that it has any.
+    /// A device with no segments simply does not answer, so probing is what
+    /// lets a Bluetooth-only device — which the Platform API does not describe
+    /// at all — reveal that it has any.
     #[test]
     fn segment_discovery_reaches_one_page_past_what_is_known() {
-        assert_eq!(Query::discover_segments(None), vec![Query::Segments(1)]);
+        // Nothing known: ask everything, because the executor stops at the
+        // first silence and a device is then mapped in one poll.
+        assert_eq!(
+            Query::discover_segments(None).len(),
+            Query::MAX_DISCOVERY_PAGES as usize
+        );
 
         // Three known segments fill page 1, so look at page 2 as well.
         assert_eq!(

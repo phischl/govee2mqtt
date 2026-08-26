@@ -91,6 +91,41 @@ impl<T> CacheComputeResult<T> {
     }
 }
 
+/// Facts learned at runtime that are worth keeping across restarts.
+pub const LEARNED: &str = "learned";
+
+/// How long a learned fact stays valid. Long, because these describe hardware:
+/// a lamp does not grow segments. Not forever, so a device that is replaced by
+/// a different one on the same id eventually forgets.
+const LEARNED_TTL: Duration = Duration::from_secs(90 * 24 * 60 * 60);
+
+/// Remember something small across restarts.
+///
+/// Used for facts a device told us that nothing else can supply — the number of
+/// segments a Bluetooth-only light has, which Govee's API does not describe.
+/// Without this, discovery starts from nothing on every restart and the
+/// entities visibly flap while it re-converges.
+pub fn remember<T: Serialize>(key: &str, value: &T) -> anyhow::Result<()> {
+    let topic = CACHE.load().topic(LEARNED)?;
+    topic.set(key, &serde_json::to_vec(value)?, LEARNED_TTL)?;
+    Ok(())
+}
+
+/// Read back something remembered. A miss is ordinary, so this has no error
+/// case: an unreadable entry is treated as absent and logged.
+pub fn recall<T: DeserializeOwned>(key: &str) -> Option<T> {
+    let topic = CACHE.load().topic(LEARNED).ok()?;
+    let value = topic.get(key).ok()??;
+
+    match serde_json::from_slice(&value.data) {
+        Ok(value) => Some(value),
+        Err(err) => {
+            log::warn!("ignoring unreadable remembered value for {key}: {err:#}");
+            None
+        }
+    }
+}
+
 pub fn invalidate_key(topic: &str, key: &str) -> anyhow::Result<()> {
     let topic = CACHE.load().topic(topic)?;
     Ok(topic.delete(key)?)

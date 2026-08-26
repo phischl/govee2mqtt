@@ -50,6 +50,9 @@ pub struct Device {
     /// Whether the device has sent `aa 05 15`, which every segmented device on
     /// the author's account does and no other device does.
     pub segment_mode_reported: bool,
+    /// A segment count carried over from an earlier run. Discovery is otherwise
+    /// forgotten on every restart, and the entities flap while it re-converges.
+    pub remembered_segment_count: Option<u32>,
     pub last_segment_colors_update: Option<DateTime<Utc>>,
     /// How many segments this device packs into one `aa a5` page. Learned from
     /// the frames, then kept; see `set_segment_colors`.
@@ -821,9 +824,19 @@ impl Device {
         }
     }
 
-    /// Segments the device itself has told us about, over `aa a5`.
+    /// Segments the device itself has told us about, over `aa a5`, in this run
+    /// or an earlier one.
     fn reported_segment_count(&self) -> Option<u32> {
-        self.segment_colors.keys().max().map(|highest| highest + 1)
+        let now = self.segment_colors.keys().max().map(|highest| highest + 1);
+        match (now, self.remembered_segment_count) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (only, None) | (None, only) => only,
+        }
+    }
+
+    /// Restore a segment count learned in an earlier run.
+    pub fn set_remembered_segment_count(&mut self, count: u32) {
+        self.remembered_segment_count = Some(count);
     }
 
     /// Segments Govee's metadata claims. Unreliable in both directions: it
@@ -850,7 +863,10 @@ impl Device {
         // The device's own word first. Govee's metadata misses this entirely
         // for an H6054 — twelve segments it never mentions — and a
         // Bluetooth-only device has no metadata at all.
-        if self.segment_mode_reported || !self.segment_colors.is_empty() {
+        if self.segment_mode_reported
+            || !self.segment_colors.is_empty()
+            || self.remembered_segment_count.is_some_and(|count| count > 0)
+        {
             return true;
         }
 
@@ -1112,6 +1128,37 @@ mod test {
         // Two spots is what the device reports, and what the user should see.
         assert_eq!(device.visible_segment_count(), Some(2));
         assert_eq!(device.segment_count(), Some(2));
+    }
+
+    /// Discovery lives in memory, so without carrying the count over a restart
+    /// a Bluetooth-only device's entities go unavailable and return over the
+    /// following polls while it re-learns.
+    #[test]
+    fn a_remembered_count_survives_having_heard_nothing_yet() {
+        let mut device = Device::new("H6116", "7E:16:A4:C1:38:14:E6:5A");
+
+        // Fresh from a restart: no frames yet, and no metadata either.
+        assert_eq!(device.visible_segment_count(), None);
+        assert!(!device.is_segmented());
+
+        device.set_remembered_segment_count(12);
+
+        assert_eq!(device.visible_segment_count(), Some(12));
+        assert_eq!(device.segment_count(), Some(12));
+        assert!(device.is_segmented());
+    }
+
+    /// A device that has grown since we last spoke keeps the larger answer.
+    #[test]
+    fn what_the_device_says_now_can_exceed_what_we_remembered() {
+        let mut device = Device::new("H6116", "7E:16:A4:C1:38:14:E6:5A");
+        device.set_remembered_segment_count(3);
+        device.set_segment_colors(&[
+            segment_page("aaa5015fff00005f00ff005fffff000000000051"),
+            segment_page("aaa5025f00ff005fff00ff5f00ff000000000052"),
+        ]);
+
+        assert_eq!(device.visible_segment_count(), Some(6));
     }
 
     /// Govee's filler slot is not all-zero, so it survives the padding rule and
