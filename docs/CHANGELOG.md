@@ -50,6 +50,16 @@ segment. Both were fixed by reading what the devices already say.
 - **Segment colour costs no Platform API quota.** A fifteen-segment scene cost fifteen cloud
   requests upstream, two after batching, and none now: the colours ride one AWS IoT message, or
   one Bluetooth session.
+- **Segment colour actually reaches the device.** Until 2026.08.26-c0a15a90 it did not, on either
+  of those two paths, and there was no fallback because a publish that succeeds locally looks
+  like success. Over AWS IoT every frame went out with checksum `00` — the encoder finished an
+  already-finished frame, XORing the payload with its own checksum — and devices discard those
+  without a word. Over Bluetooth the frames were handed to the executor as raw bytes where the
+  wire format wants base64. Both are fixed and verified against hardware; a Govee frame is never
+  acknowledged on the wire, which is why neither showed up as an error.
+- **Segment discovery no longer truncates.** It stopped at eighteen segments, and a device that
+  reported exactly eighteen could not be told from one that had been cut off. A thirty-slot
+  string would have lost twelve silently.
 - **Segmented devices take colour over Bluetooth**, which they could not before — the whole-strip
   colour write does nothing on them.
 - **Segments are discovered from the device**, not from Govee's metadata, which turns out to be
