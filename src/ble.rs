@@ -385,6 +385,47 @@ impl PacketManager {
 
         all_codecs.push(PacketCodec::new(
             &[GENERIC_LIGHT],
+            |value: &SetSegmentBrightness| {
+                anyhow::ensure!(
+                    value.mask != 0,
+                    "a segment brightness command that names no segment does nothing"
+                );
+                anyhow::ensure!(
+                    value.mask >> (SEGMENT_MASK_BYTES * 8) == 0,
+                    "segment mask {:#x} does not fit in {SEGMENT_MASK_BYTES} bytes",
+                    value.mask
+                );
+                anyhow::ensure!(
+                    value.percent <= 100,
+                    "segment brightness is a percentage, got {}",
+                    value.percent
+                );
+
+                let mut bytes = vec![0x33, 0x05, 0x15, 0x02, value.percent];
+                debug_assert_eq!(bytes.len(), SEGMENT_BRIGHTNESS_MASK_AT);
+                bytes.extend_from_slice(&value.mask.to_le_bytes()[..SEGMENT_MASK_BYTES]);
+                Ok(finish(bytes))
+            },
+            |data| {
+                let body = notification_body(data, &[0x33, 0x05, 0x15, 0x02])?;
+                anyhow::ensure!(
+                    body.len() >= 1 + SEGMENT_MASK_BYTES,
+                    "segment brightness command is too short: {} bytes",
+                    body.len()
+                );
+
+                let mut mask = [0u8; 8];
+                mask[..SEGMENT_MASK_BYTES].copy_from_slice(&body[1..][..SEGMENT_MASK_BYTES]);
+
+                Ok(GoveeBlePacket::SetSegmentBrightness(SetSegmentBrightness {
+                    percent: body[0],
+                    mask: u64::from_le_bytes(mask),
+                }))
+            },
+        ));
+
+        all_codecs.push(PacketCodec::new(
+            &[GENERIC_LIGHT],
             |value: &NotifySegmentColors| {
                 let mut bytes = vec![0xaa, 0xa5, value.page];
                 for segment in &value.segments {
@@ -788,6 +829,54 @@ impl SetSegmentColorRgb {
     }
 }
 
+/// Where the mask starts in a segment *brightness* frame.
+///
+/// Immediately after the value, not at [`SEGMENT_MASK_AT`] like the colour
+/// frame. That difference is the whole reason this command went unfound for
+/// weeks: an early probe used sub-command `02` — which is right — but put the
+/// mask where the colour frame keeps it, and that position is payload here.
+pub const SEGMENT_BRIGHTNESS_MASK_AT: usize = 5;
+
+/// Set the brightness of individual segments.
+///
+/// ```text
+/// 33 05 15 02 <percent> <mask, little-endian from byte 5>
+/// ```
+///
+/// Taken from a Bluetooth HCI capture of the Govee app on 2026-08-26 — the
+/// cloud never carries the app's commands, only a receipt — and then verified
+/// against hardware: bit 8 dimmed segment 8 of an H6054 and left its colour
+/// alone, bit 16 dimmed segment 16 of an H7020. So the mask reaches at least
+/// byte 7. It is written [`SEGMENT_MASK_BYTES`] wide, as the colour frame is,
+/// on the assumption the field is the same size; only the first three bytes
+/// are measured, and nothing here writes past them because no device on hand
+/// has more than thirty segments.
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub struct SetSegmentBrightness {
+    pub percent: u8,
+    pub mask: u64,
+}
+
+impl SetSegmentBrightness {
+    /// Build a command for a set of segment indices.
+    pub fn for_segments(
+        segments: impl IntoIterator<Item = u32>,
+        percent: u8,
+    ) -> anyhow::Result<Self> {
+        let mut mask = 0u64;
+        for segment in segments {
+            let bit = u64::from(segment);
+            anyhow::ensure!(
+                bit < (SEGMENT_MASK_BYTES * 8) as u64,
+                "segment {segment} is past the {} this frame can address",
+                SEGMENT_MASK_BYTES * 8
+            );
+            mask |= 1 << bit;
+        }
+        Ok(Self { percent, mask })
+    }
+}
+
 /// Most segment groups an `aa a5` page can carry: the seventeen payload bytes
 /// hold a page number and four groups of four.
 pub const MAX_SEGMENTS_PER_PAGE: usize = 4;
@@ -938,6 +1027,7 @@ pub enum GoveeBlePacket {
     NotifyDeviceColor(NotifyDeviceColor),
     NotifySegmentColors(NotifySegmentColors),
     SetSegmentColorRgb(SetSegmentColorRgb),
+    SetSegmentBrightness(SetSegmentBrightness),
     NotifySegmentMode(NotifySegmentMode),
     SetHumidifierNightlight(SetHumidifierNightlightParams),
     NotifyHumidifierMode(NotifyHumidifierMode),
@@ -1361,6 +1451,67 @@ a3 ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5c
             Base64HexBytes(HexBytes(decoded)).decode_for_sku(GENERIC_LIGHT),
             GoveeBlePacket::SetSegmentColorRgb(command)
         );
+    }
+
+    /// Per-segment brightness, from the Govee app's own Bluetooth traffic.
+    ///
+    /// The first two rows are transcribed byte for byte out of an HCI snoop
+    /// log taken while someone moved one segment's slider in the app; the
+    /// other two were sent by this code and confirmed by reading the `aa a5`
+    /// pages back. Note where the mask sits — right behind the value, not at
+    /// `SEGMENT_MASK_AT` where the colour frame keeps it. An earlier probe used
+    /// the correct sub-command with the colour frame's mask position and found
+    /// nothing, which cost weeks.
+    #[test]
+    fn segment_brightness_matches_the_app_and_the_hardware() {
+        let cases = [
+            // The app, segment 5 -> 40%.
+            (vec![5u32], 40u8, "3305150228 20 00000000000000000000000000 29"),
+            // The app, the same segment -> 100%.
+            (vec![5], 100, "3305150264 20 00000000000000000000000000 65"),
+            // Ours, segment 8 -> 40%: bit 8 needs a second mask byte.
+            (vec![8], 40, "3305150228 0001 000000000000000000000000 08"),
+            // Ours, segment 16 -> 50% on an H7020: a third mask byte.
+            (vec![16], 50, "3305150232 000001 0000000000000000000000 12"),
+        ];
+
+        for (segments, percent, expected) in cases {
+            let value = SetSegmentBrightness::for_segments(segments.clone(), percent).unwrap();
+            assert_eq!(
+                hex(&Base64HexBytes::encode_for_sku(GENERIC_LIGHT, &value).unwrap()),
+                expected.replace(' ', ""),
+                "encoding {segments:?} at {percent}%"
+            );
+            round_trip(
+                GENERIC_LIGHT,
+                &value,
+                GoveeBlePacket::SetSegmentBrightness(value),
+            );
+        }
+    }
+
+    /// The two segment sub-commands are not interchangeable.
+    ///
+    /// `01` carries RGB with the mask at byte 12, `02` carries a percentage
+    /// with the mask at byte 5. Confusing them is what made per-segment
+    /// brightness look unsolvable, so it is worth a test that says so.
+    #[test]
+    fn segment_colour_and_brightness_put_the_mask_in_different_places() {
+        let colour = SetSegmentColorRgb::for_segments([0u32], (0xff, 0, 0)).unwrap();
+        let bright = SetSegmentBrightness::for_segments([0u32], 100).unwrap();
+
+        let colour = encode_for_generic_light(&colour).unwrap();
+        let bright = encode_for_generic_light(&bright).unwrap();
+
+        assert_eq!(colour[3], 0x01);
+        assert_eq!(bright[3], 0x02);
+        assert_eq!(colour[SEGMENT_MASK_AT], 0x01, "colour mask at byte 12");
+        assert_eq!(colour[SEGMENT_BRIGHTNESS_MASK_AT], 0x00, "and not at byte 5");
+        assert_eq!(
+            bright[SEGMENT_BRIGHTNESS_MASK_AT], 0x01,
+            "brightness mask at byte 5"
+        );
+        assert_eq!(bright[SEGMENT_MASK_AT], 0x00, "and not at byte 12");
     }
 
     /// Every one of these was sent to a real H6072 or H7020 and the change

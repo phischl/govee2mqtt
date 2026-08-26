@@ -8,7 +8,7 @@
 //! This collects the commands that arrive together, groups them by the value
 //! they ask for, and issues one request per distinct value.
 
-use crate::ble::{Base64HexBytes, SetSegmentColorRgb};
+use crate::ble::{Base64HexBytes, SetSegmentBrightness, SetSegmentColorRgb};
 use crate::service::device::Device;
 use crate::service::state::StateHandle;
 use std::collections::HashMap;
@@ -50,20 +50,17 @@ impl Pending {
         self.brightness.len() + self.rgb.len()
     }
 
-    /// What is left for the Platform API once AWS IoT has taken the colours.
-    fn platform_only(&self, colour_sent: bool) -> (usize, usize) {
-        if colour_sent {
-            (
-                self.brightness.len(),
-                self.brightness.values().map(Vec::len).sum(),
-            )
-        } else {
-            (
-                self.request_count(),
-                self.brightness.values().map(Vec::len).sum::<usize>()
-                    + self.rgb.values().map(Vec::len).sum::<usize>(),
-            )
-        }
+    /// What the Platform API costs, for the log line.
+    ///
+    /// Reached only when neither AWS IoT nor Bluetooth carried the batch, so
+    /// there is nothing to subtract: both colour and brightness now travel as
+    /// frames, and they travel together or not at all.
+    fn platform_only(&self) -> (usize, usize) {
+        (
+            self.request_count(),
+            self.brightness.values().map(Vec::len).sum::<usize>()
+                + self.rgb.values().map(Vec::len).sum::<usize>(),
+        )
     }
 }
 
@@ -151,11 +148,11 @@ impl SegmentBatcher {
         // Colour goes over AWS IoT when the device is reachable that way: one
         // message carries every colour in the batch, and it spends no Platform
         // API quota — where fifteen segments otherwise cost fifteen requests.
-        let colour_sent = match self.send_rgb_via_iot(state, &device, pending).await {
+        let sent = match self.send_via_iot(state, &device, pending).await {
             Ok(sent) => sent,
             Err(err) => {
                 // Falling back rather than failing: the Platform API below did
-                // this job before the frame was reverse-engineered.
+                // this job before the frames were reverse-engineered.
                 log::warn!("Setting segments for {device} over IoT failed: {err:#}");
                 false
             }
@@ -164,8 +161,8 @@ impl SegmentBatcher {
         // Bluetooth carries the same frames, and for a segmented device that
         // has no cloud path it is the only thing that can. Tried after IoT
         // because a radio session is slower and holds a proxy connection slot.
-        let colour_sent = colour_sent
-            || match self.send_rgb_via_ble(state, &device, pending).await {
+        let sent = sent
+            || match self.send_via_ble(state, &device, pending).await {
                 Ok(sent) => sent,
                 Err(err) => {
                     log::warn!("Setting segments for {device} over Bluetooth failed: {err:#}");
@@ -173,7 +170,7 @@ impl SegmentBatcher {
                 }
             };
 
-        if pending.brightness.is_empty() && colour_sent {
+        if sent {
             return Ok(());
         }
 
@@ -185,7 +182,7 @@ impl SegmentBatcher {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("set segments for {device}: no HTTP device info"))?;
 
-        let (requests, segments) = pending.platform_only(colour_sent);
+        let (requests, segments) = pending.platform_only();
         log::info!(
             "Using Platform API to set {segments} segment change(s) on {device} \
              in {requests} request(s)"
@@ -196,28 +193,26 @@ impl SegmentBatcher {
                 .set_segment_brightness(info, segments, *percent)
                 .await?;
         }
-        if !colour_sent {
-            for ((r, g, b), segments) in &pending.rgb {
-                client.set_segment_rgb(info, segments, *r, *g, *b).await?;
-            }
+        for ((r, g, b), segments) in &pending.rgb {
+            client.set_segment_rgb(info, segments, *r, *g, *b).await?;
         }
 
         Ok(())
     }
 
-    /// Send the batch's colours as raw frames over Bluetooth.
+    /// Send the batch as raw frames over Bluetooth.
     ///
     /// Returns whether it carried them. Declines quietly when Bluetooth is off,
     /// excluded for this device, the executor is absent, or the circuit breaker
     /// is open — those are routing decisions, and the Platform API is still
     /// there.
-    async fn send_rgb_via_ble(
+    async fn send_via_ble(
         &self,
         state: &StateHandle,
         device: &Device,
         pending: &Pending,
     ) -> anyhow::Result<bool> {
-        if pending.rgb.is_empty() {
+        if pending.rgb.is_empty() && pending.brightness.is_empty() {
             return Ok(true);
         }
 
@@ -231,31 +226,47 @@ impl SegmentBatcher {
             return Ok(false);
         }
 
-        let frames = Self::encode_rgb(pending)?;
-        let count: usize = pending.rgb.values().map(Vec::len).sum();
+        let frames = Self::encode(pending)?;
+        let touched = Self::touched(pending);
         log::info!(
-            "Using Bluetooth to set {count} segment colour(s) on {device} in one session, \
+            "Using Bluetooth to set {} segment change(s) on {device} in one session, \
              {} frame(s)",
+            touched.len(),
             frames.len()
         );
 
-        let touched: Vec<u32> = pending.rgb.values().flatten().copied().collect();
         scheduler
             .send_frames(state, &device.id, &device.sku, &address, &frames, &touched)
             .await?;
         Ok(true)
     }
 
-    /// One frame per distinct colour, each naming its own segments.
-    fn encode_rgb(pending: &Pending) -> anyhow::Result<Vec<Vec<u8>>> {
+    /// One frame per distinct value, each naming its own segments.
+    ///
+    /// Colour and brightness travel together: they are independent frames and a
+    /// device applies several from one message, so a batch that changes both
+    /// costs one message rather than two.
+    fn encode(pending: &Pending) -> anyhow::Result<Vec<Vec<u8>>> {
+        let colours = pending.rgb.iter().map(|((r, g, b), segments)| {
+            let command =
+                SetSegmentColorRgb::for_segments(segments.iter().copied(), (*r, *g, *b))?;
+            crate::ble::encode_for_generic_light(&command)
+        });
+        let brightnesses = pending.brightness.iter().map(|(percent, segments)| {
+            let command = SetSegmentBrightness::for_segments(segments.iter().copied(), *percent)?;
+            crate::ble::encode_for_generic_light(&command)
+        });
+        colours.chain(brightnesses).collect()
+    }
+
+    /// Every segment the batch touches, for the read-back.
+    fn touched(pending: &Pending) -> Vec<u32> {
         pending
             .rgb
-            .iter()
-            .map(|((r, g, b), segments)| {
-                let command =
-                    SetSegmentColorRgb::for_segments(segments.iter().copied(), (*r, *g, *b))?;
-                crate::ble::encode_for_generic_light(&command)
-            })
+            .values()
+            .chain(pending.brightness.values())
+            .flatten()
+            .copied()
             .collect()
     }
 
@@ -271,13 +282,13 @@ impl SegmentBatcher {
     /// probes -- brightness in byte 7, a `02` sub-command, brightness after the
     /// mask -- all did nothing or something else. So it stays on the Platform
     /// API.
-    async fn send_rgb_via_iot(
+    async fn send_via_iot(
         &self,
         state: &StateHandle,
         device: &Device,
         pending: &Pending,
     ) -> anyhow::Result<bool> {
-        if pending.rgb.is_empty() {
+        if pending.rgb.is_empty() && pending.brightness.is_empty() {
             return Ok(true);
         }
 
@@ -292,13 +303,13 @@ impl SegmentBatcher {
         }
 
         let mut frames = vec![];
-        for raw in Self::encode_rgb(pending)? {
+        for raw in Self::encode(pending)? {
             frames.extend(Base64HexBytes::with_bytes(raw).base64());
         }
 
-        let count: usize = pending.rgb.values().map(Vec::len).sum();
+        let count = Self::touched(pending).len();
         log::info!(
-            "Using AWS IoT to set {count} segment colour(s) on {device} in one message, \
+            "Using AWS IoT to set {count} segment change(s) on {device} in one message, \
              {} frame(s)",
             frames.len()
         );
@@ -346,7 +357,7 @@ mod test {
         pending.add(1, None, Some((0, 0, 255)));
         pending.add(5, None, Some((255, 255, 255)));
 
-        let frames = SegmentBatcher::encode_rgb(&pending).unwrap();
+        let frames = SegmentBatcher::encode(&pending).unwrap();
         assert_eq!(frames.len(), 2, "one frame per distinct colour");
 
         // Both are the segment colour command, and every mask bit set is one
@@ -360,20 +371,47 @@ mod test {
         }
     }
 
-    /// Once AWS IoT has carried the colours, only brightness is left for the
-    /// Platform API — which is the whole point of routing colour that way.
+    /// Brightness is a frame now too, and rides the same message.
+    ///
+    /// Until the Govee app's own traffic was captured this went to the Platform
+    /// API, one request per distinct value, because the command was unknown.
     #[test]
-    fn iot_carrying_the_colours_leaves_only_brightness_for_the_cloud() {
+    fn colour_and_brightness_ride_one_message() {
+        let mut pending = Pending::default();
+        pending.add(0, Some(40), Some((255, 0, 0)));
+        pending.add(1, Some(40), None);
+
+        let frames = SegmentBatcher::encode(&pending).unwrap();
+        assert_eq!(frames.len(), 2, "one colour frame and one brightness frame");
+
+        let colour = frames.iter().find(|f| f[3] == 0x01).expect("colour frame");
+        let bright = frames.iter().find(|f| f[3] == 0x02).expect("brightness frame");
+
+        // The colour names segment 0 only, with the mask at byte 12.
+        assert_eq!((colour[4], colour[5], colour[6]), (255, 0, 0));
+        assert_eq!(colour[12], 0b0000_0001);
+
+        // The brightness names both, with the mask right behind the value.
+        assert_eq!(bright[4], 40);
+        assert_eq!(bright[5], 0b0000_0011);
+
+        assert_eq!(SegmentBatcher::touched(&pending).len(), 3);
+    }
+
+    /// What the Platform API would cost, when it is reached at all.
+    ///
+    /// It no longer is for a device with an AWS IoT or Bluetooth path: colour
+    /// and brightness are both frames now, they ride one message, and they
+    /// travel together or not at all. This counts the fallback.
+    #[test]
+    fn the_platform_fallback_costs_one_request_per_distinct_value() {
         let mut pending = Pending::default();
         pending.add(0, Some(50), Some((255, 0, 0)));
         pending.add(1, None, Some((255, 0, 0)));
         pending.add(2, None, Some((0, 0, 255)));
 
-        // Everything over the Platform API: two colours plus one brightness.
-        assert_eq!(pending.platform_only(false), (3, 4));
-
-        // Colours over IoT: one request for the single brightness change.
-        assert_eq!(pending.platform_only(true), (1, 1));
+        // Two colours plus one brightness, over four segment changes.
+        assert_eq!(pending.platform_only(), (3, 4));
     }
 
     #[test]

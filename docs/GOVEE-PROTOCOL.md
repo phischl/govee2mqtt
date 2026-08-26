@@ -147,6 +147,34 @@ AA A9 02  01 32                       0x32 = 50
 echoes the new value back as `AA A9 02 01 <v>` — but it changes nothing in the `AA A5` pages, so
 whatever it sets, it is not per-segment brightness.
 
+### Writing a segment's brightness
+
+```
+33 05 15 02 <percent> <mask, little-endian from byte 5>
+```
+
+Note where the mask sits: **immediately behind the value**, not at byte 12 where the colour
+frame keeps it. The sub-command is `02` against colour's `01`.
+
+That difference is the whole story of why this took so long. An early probe used sub-command
+`02` — correct — with the mask at the colour frame's position, found nothing, and the
+sub-command was written off with it. Byte 12 is payload for this command.
+
+Taken from a Bluetooth HCI capture of the Govee app, which is the only way to see what it
+writes: over the cloud its commands go to the device's own topic and only a receipt is visible.
+Two frames straight out of that log, then two of our own confirmed against hardware:
+
+| Source | Frame | Effect |
+|---|---|---|
+| the app | `33 05 15 02 28 20` | segment 5 → 40 % |
+| the app | `33 05 15 02 64 20` | segment 5 → 100 % |
+| ours | `33 05 15 02 28 00 01` | H6054 segment 8 → 40 %, colour untouched |
+| ours | `33 05 15 02 32 00 00 01` | H7020 segment 16 → 50 % |
+
+So the mask reaches at least byte 7, twenty-four segments. Setting brightness leaves the
+segment's colour alone, and setting colour leaves its brightness alone — they are independent
+commands over the same segments, and both can travel in one `ptReal`.
+
 ### `AA 05 15` means "I have segments"
 
 Present in the status of every segmented device on one account and in none of the others. It is
@@ -183,8 +211,24 @@ opposite ways:
 | Take | the **larger** of reported and claimed | the **smaller** of the two |
 | Because | mask bits past the end reach nothing; a count too small leaves segments untouched | an entity too many is a control that does nothing |
 
-One case defeats both: the H7020, which a second string can be chained to, reports thirty slots
-for fifteen bulbs whether or not anything is plugged in, and both sources agree on thirty. The
+**The Govee app does not derive the count from the pages either — it stops early.** Captured on an
+H7020 that reports thirty slots: the app read `AA A5 01` through `AA A5 05` and then stopped. Five
+pages of three is fifteen, which is what it displays and what the hardware has. It knew before it
+started reading.
+
+What it asked first is the interesting part. Only on this device, and only right before the pages,
+it sent `AA 0F` and got `01` back. That is the frame long suspected of counting connected strings,
+and one string of fifteen bulbs gives exactly the fifteen the app then read. The reading is
+consistent but not proven: the app also knows the SKU from the account, so "one string × fifteen
+per string, fifteen from a product table" fits the same evidence. Either way the *per-string
+length* is knowledge the device does not appear to volunteer, which means a per-SKU rule is
+unavoidable for this family — the device can only be asked how many strings, not how long they are.
+
+Confirmed at the same time: the app addresses this device as **fifteen** segments, not thirty.
+Setting "the last two bulbs" produced mask `0x6000` — bits 13 and 14, not 28 and 29.
+
+One case defeats both counts: the H7020, which a second string can be chained to, reports thirty
+slots for fifteen bulbs whether or not anything is plugged in, and both sources agree on thirty. The
 extra slots accept writes and hold the value while driving nothing. `AA 0F <n>` appears only on
 that device and is the best candidate for the count of connected strings, on one observation of
 one value — untested, because it needs a second string.
@@ -205,44 +249,62 @@ Observed in status replies. All checksums verify.
 | `AA 23 FF <00 00 00 80> × 4` | several |
 | `AA 41 <n>` | some segmented devices, values `01` and `02` |
 | `AA A9 …` | one two-bar device only; see the segment-write section |
-| `AA 33 11` | the same device |
-| `AA 54` | the same device, as an unsolicited `ptReal` |
+| `AA 54` | as an unsolicited `ptReal` |
 | `AA 0F <n>` | one chainable device only |
 | `AA BA 01 00 64 64 64 …` | one device; three times 100 |
 
+Five frames that used to be on that list are now accounted for, all from watching the Govee
+app's own connection handshake over Bluetooth:
+
+| Query | Answer |
+|---|---|
+| `AA 06` | `"1.09.13"` — plain ASCII |
+| `AA 07 03` | `"3.02.01"` |
+| `AA 20` | `"1.03.00"` |
+| `AA 21` | `"1.00.29"` |
+| `AA 33` | `AA 33 11` |
+| `AA A3` | all zeros — the scene family, idle |
+
+So four are version strings, and the app keeps the connection alive by **repeating one query every
+two seconds** for its whole life. Which query differs by device: `AA 33` on an H6054, `AA 01` on an
+H7020. So it is the repetition that matters, not a particular keep-alive frame — which is what
+§4.4 of the working notes was looking for and would not have found. `AA 14` answers with six bytes that look like an address. The app also writes
+`33 09 10 24 25 03 01 02 00 1A 08 EA 07 …` right after connecting, where `EA 07` is `0x07EA` =
+2026 little-endian: a clock synchronisation.
+
+**The app queries far more than it displays**, and its opening burst is the cheapest catalogue of
+valid queries there is: `AA 06`, `AA 07`, `AA 21`, `AA 20`, `AA 14`, `AA 23`, `AA 11`, `AA 12`,
+`AA 04`, `AA 01`, `AA 33`, `AA 05 01`, `AA A5 01..03`, `AA A9 00`, `AA A9 02`. Everything in it is
+a question the device answers.
+
 Also not worked out: music mode, DIY modes and keep-alive.
 
-**Per-segment brightness is half solved**, and the halves are worth keeping apart.
+**Per-segment brightness is solved** — see the segment write section above for the command. What
+follows is how it was found, kept because the wrong turns are the useful part.
 
 *Reading it is done.* The `AA A5` pages carry it as a percentage, per segment, independent of the
 master dimmer. Verified on three SKUs against screenshots of the Govee app taken at a known time:
 `0x4B` where the app said 75 %, `0x1F` where it said 31 %. Nothing more is needed there.
 
-*Writing it as a frame is not.* Three probes failed — brightness in byte 7, a `02` sub-command,
-brightness placed after the mask — and each did nothing or something else. Two things narrow it
-since:
+*Writing it as a frame took a Bluetooth capture.* Three probes had failed — brightness in byte 7,
+a `02` sub-command, brightness placed after the mask — and the second of those was the painful
+one: the sub-command was right and only the mask position was wrong, so a correct guess was
+discarded as a dead end.
 
-- **The colour write leaves brightness alone.** `33 05 15` sets `<r> <g> <b>` and the segment
-  keeps the brightness byte it had, so brightness is a separate command rather than a field of
-  this one.
-- **The app's brightness change is in the `05` family.** Driven over the cloud with the phone's
-  Bluetooth off, setting one segment's brightness produced the receipt `33 05 00` — the same
-  opcode as its colour change. So the command is a sibling of `33 05 15`, not something unrelated.
+Two observations narrowed it before the capture, and both held up. The colour write leaves the
+brightness byte alone, so brightness had to be a separate command rather than a field. And with
+the phone's Bluetooth switched off, the app's brightness change produced the receipt `33 05 00` —
+the same opcode as its colour change — so the command had to be a sibling of `33 05 15`.
 
-A candidate recorded here earlier is **refuted**: `AA A9 02 01 32` carries a value that happened to
-equal the device's per-segment brightness, and `33 A9 02 01 <v>` turned out to be a working write —
-the device echoes the new value straight back. But the `AA A5` pages do not move when it does, so
-whatever that sets, it is not this.
+One candidate recorded here earlier is **refuted**: `AA A9 02 01 32` carries a value that happened
+to equal the device's per-segment brightness, and `33 A9 02 01 <v>` turned out to be a working
+write — the device echoes the new value straight back. But the `AA A5` pages do not move when it
+does, so whatever that sets, it is not this.
 
-Note that per-segment brightness is not *missing* from the product: Govee's Platform API sets it,
-and that is where this fork sends it. What is missing is the frame, which is what a
-Bluetooth-only device would need.
-
-The published reverse-engineering material does not have it either. Two well-known script
-collections between them use exactly five write opcodes — `33 01`, `33 04` and `33 05 0d`, all
-against a single non-segmented downlight. Segments do not appear at all. So the remaining route
-is a Bluetooth HCI log taken on a phone while the Govee app moves one segment's brightness
-slider.
+The published reverse-engineering material was no help and is worth ruling out in writing. Two
+well-known script collections between them use exactly five write opcodes — `33 01`, `33 04` and
+`33 05 0d` — all against a single non-segmented downlight. Segments do not appear at all. The HCI
+log was the only route, and it took four minutes once someone thought of it.
 
 ## 7. The same frames over AWS IoT
 

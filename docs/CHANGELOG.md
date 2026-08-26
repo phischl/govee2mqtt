@@ -57,6 +57,12 @@ segment. Both were fixed by reading what the devices already say.
   without a word. Over Bluetooth the frames were handed to the executor as raw bytes where the
   wire format wants base64. Both are fixed and verified against hardware; a Govee frame is never
   acknowledged on the wire, which is why neither showed up as an error.
+- **Per-segment brightness travels as a frame.** It went to Govee's Platform API, one request per
+  distinct value, because the command was not known — three probes had missed it, one of them by
+  putting the mask where the *colour* command keeps it. Captured from the Govee app's own
+  Bluetooth traffic and verified on two models, it now rides the same message as colour. A scene
+  that changes both across fifteen segments costs **no Platform API requests at all**, where
+  upstream spent thirty.
 - **A scene is one message again.** The batcher's 150 ms window sat *downstream* of the
   per-device lock, so it only ever saw one command at a time: four segments named in a single
   `light.turn_on` went out as four separate messages two seconds apart. The lock now belongs to
@@ -124,9 +130,9 @@ segment. Both were fixed by reading what the devices already say.
 
 ## Known limits
 
-- An H7020 reports thirty segments for fifteen bulbs, because a second string can be chained to
-  it and nothing distinguishes "absent" from "present" in the frames.
-- Per-segment *brightness* can be read but not written; the command for it is not known.
+- The Govee app treats an H7020 as fifteen segments while the device reports thirty slots, and
+  nothing it asks the device explains how it knows. Home Assistant still gets thirty segment
+  entities for one, of which the upper fifteen do nothing.
 - Colour temperature on a segmented device still goes to the cloud — there is no segment
   equivalent for it.
 - Base image signatures are not verified during the add-on build. The bundled cosign is too old
