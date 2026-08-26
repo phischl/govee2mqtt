@@ -156,6 +156,23 @@ pub struct QuerySpec {
     /// instead of one.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub stop_if_unanswered: bool,
+    /// Bytes a notification must start with to count as this query's answer,
+    /// base64 as `data` is.
+    ///
+    /// Without it the executor takes the first notification that arrives, and
+    /// a Govee light acknowledges every write with a frame on the same handle.
+    /// After a command, that receipt beats the reply: the query took the
+    /// receipt, reported success, and the real answer was never awaited — so a
+    /// light switched off went on reporting itself as on for as long as nobody
+    /// polled it.
+    ///
+    /// The executor stays protocol-agnostic. It compares the prefix it was
+    /// handed and keeps waiting on anything else, bounded by `timeout_ms`.
+    ///
+    /// Skipped when absent so an executor predating this field sees exactly
+    /// what it saw before.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expect_prefix: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -379,6 +396,7 @@ mod test {
                 timeout_ms: 5000,
                 optional: false,
                 stop_if_unanswered: false,
+                expect_prefix: Some("qgE=".to_string()),
             }),
         ];
 
@@ -401,7 +419,8 @@ mod test {
       "write_char": "write-char",
       "notify_char": "notify-char",
       "data": "qgE=",
-      "timeout_ms": 5000
+      "timeout_ms": 5000,
+      "expect_prefix": "qgE="
     }
   }
 ]

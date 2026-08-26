@@ -81,6 +81,29 @@ device too.
 `keep_open_ms` overrides the configured idle timeout for this device; `0` means
 use the configured value.
 
+A `query` takes three optional fields beyond the ones above:
+
+| Field | Meaning |
+|---|---|
+| `optional` | Silence is an acceptable answer. The result is `{"kind": "unanswered"}` instead of an error. |
+| `stop_if_unanswered` | Silence means the rest of the job is pointless — for paged data, where the first unanswered page says there are no more. Only meaningful with `optional`. |
+| `expect_prefix` | Base64 bytes a notification must start with to count as this query's answer. Anything else is ignored and the wait continues, bounded by `timeout_ms`. |
+
+**`expect_prefix` exists because a device also talks unprompted.** A Govee light
+acknowledges every write with a frame on the same notify handle, so a query
+issued straight after a command is answered by that receipt rather than by the
+device's actual state. Without the prefix the executor took it, reported
+success, and the real reply was never awaited — a light switched off went on
+reporting itself as on for as long as nothing else polled it.
+
+The executor still knows nothing about what any of these bytes mean. It compares
+the prefix it was handed, which keeps the protocol knowledge on the add-on side
+where the rest of it lives.
+
+All three are omitted when unset, so an executor predating them sees exactly
+what it saw before, and an add-on talking to an older executor degrades to the
+older behaviour rather than failing.
+
 ### `<prefix>/res` — executor to add-on
 
 ```json

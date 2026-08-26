@@ -228,3 +228,25 @@ def test_stopping_on_silence_is_off_by_default():
     job = parse_request(_query_request())
 
     assert job.ops[0].stop_if_unanswered is False
+
+
+def test_a_query_can_require_a_prefix_on_its_answer():
+    """A Govee light acknowledges every write with a frame on the same notify
+    handle, so after a command that receipt reaches us before the reply to a
+    query does. Taking the first notification meant the query was satisfied by
+    the receipt and the real answer was never awaited -- a light switched off
+    reported itself as on indefinitely.
+
+    The executor still knows nothing about what the bytes mean; it compares
+    the prefix it was handed."""
+    job = parse_request(_query_request(expect_prefix=base64.b64encode(b"\xaa\x01").decode()))
+
+    assert job.ops[0].expect_prefix == b"\xaa\x01"
+
+
+def test_a_query_accepts_any_answer_by_default():
+    """Omitted, this behaves as it did before the field existed -- which is
+    right for a device that only ever speaks when spoken to."""
+    job = parse_request(_query_request())
+
+    assert job.ops[0].expect_prefix == b""

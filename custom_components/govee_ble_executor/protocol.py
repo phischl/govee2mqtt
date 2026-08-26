@@ -88,6 +88,22 @@ class QueryOp:
     Bluetooth-only light out of service every poll.
     """
 
+    expect_prefix: bytes = b""
+    """Bytes a notification must start with to count as this query's answer.
+
+    Empty accepts the first notification that arrives, which is what this did
+    before and is still right for a device that only ever speaks when spoken
+    to. It is wrong for one that also volunteers traffic: a Govee light
+    acknowledges every write with a frame of its own, and after a command that
+    receipt reaches the notify handle before the answer does. The query took
+    the receipt, reported success, and the real reply was never awaited -- so a
+    light switched off went on reporting itself as on, indefinitely.
+
+    This stays protocol-agnostic on purpose. The executor knows nothing about
+    what the bytes mean; it compares the prefix the add-on handed it and keeps
+    waiting on anything else, until the timeout the add-on also set.
+    """
+
 
 Op = WriteOp | DelayOp | QueryOp
 
@@ -180,6 +196,7 @@ def _parse_op(raw: Any) -> Op:
             timeout_ms=int(spec.get("timeout_ms", 5000)),
             optional=bool(spec.get("optional", False)),
             stop_if_unanswered=bool(spec.get("stop_if_unanswered", False)),
+            expect_prefix=_decode_data(spec["expect_prefix"]) if "expect_prefix" in spec else b"",
         )
 
     raise ProtocolError(f"unrecognised op: {sorted(raw)}")

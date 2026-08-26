@@ -119,6 +119,14 @@ segment. Both were fixed by reading what the devices already say.
 
 ## Robustness
 
+- **A light switched off no longer reports itself as on.** A Govee device
+  acknowledges every write with a frame on the same notify handle, and after a command that
+  receipt reached the executor before the device's actual answer did. The read-back took the
+  receipt, reported success, and learned nothing — so the state stayed at whatever it had been,
+  sometimes for hours, and the colour picker collapsed to black because that is what the stale
+  value said. A query now names the header its answer must carry, and what a command asked for is
+  believed straight away rather than only after the device confirms it.
+
 - One unreadable frame in a status message no longer discards the whole message. A device sent
   something that was not valid base64 — random enough to fit the `supportEnc` flag Govee added the
   same week — and strictness at the wrong granularity turned one unknown into total data loss.

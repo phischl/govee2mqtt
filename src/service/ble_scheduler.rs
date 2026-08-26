@@ -242,6 +242,36 @@ impl PendingOps {
         Ok(())
     }
 
+    /// Write what this session asked for into the device's Bluetooth status.
+    ///
+    /// Only the attributes it actually set, and only the ones that make sense
+    /// together: switching off says nothing about colour, and a brightness of
+    /// zero was sent as one, so that is what is recorded.
+    fn apply_optimistically(&self, device: &mut Device) -> bool {
+        device.update_ble_device_status(|status| {
+            if let Some(on) = self.power {
+                status.on = on;
+                if !on {
+                    // Nothing else went out in this session.
+                    return;
+                }
+            } else if self.powers_on_implicitly() {
+                status.on = true;
+            }
+
+            if let Some(percent) = self.brightness {
+                status.brightness = percent.max(1);
+            }
+            if let Some((r, g, b)) = self.color {
+                status.color = DeviceColor { r, g, b };
+                status.color_temperature_kelvin = 0;
+            }
+            if let Some(kelvin) = self.kelvin {
+                status.color_temperature_kelvin = kelvin.into();
+            }
+        })
+    }
+
     /// The attributes worth reading back after this session.
     ///
     /// Only what we actually changed: verifying everything would triple the
@@ -447,6 +477,24 @@ impl Query {
         pages.into_iter().map(Query::Segments).collect()
     }
 
+    /// The header a reply to this query has to start with.
+    ///
+    /// A device answers `aa 01` with `aa 01`, and so on — every query and its
+    /// reply share a header, which is why `ble.rs` builds queries as free
+    /// functions rather than codecs. That shared header is exactly what tells
+    /// a reply apart from the receipt a write earns, which carries the `33`
+    /// opcode instead.
+    fn expect_prefix(&self) -> Vec<u8> {
+        match self {
+            Self::Power => vec![0xaa, 0x01],
+            Self::Brightness => vec![0xaa, 0x04],
+            Self::Color => vec![0xaa, 0x05],
+            // The page number too: pages are asked for in order and a device
+            // answering the wrong one would otherwise shift the whole map.
+            Self::Segments(page) => vec![0xaa, 0xa5, *page],
+        }
+    }
+
     fn frame(&self) -> anyhow::Result<Vec<u8>> {
         let encoded = match self {
             Self::Power => query_device_power(),
@@ -650,6 +698,33 @@ impl BleScheduler {
             Err(err) => self.note_failure(&device_id, err).await,
         }
 
+        // Believe what we sent, before asking the device to confirm it.
+        //
+        // This is the first half of D6, and it was missing: the state came only
+        // from the read-back, so a read-back that learned nothing left Home
+        // Assistant showing whatever it had believed before. A light switched
+        // off went on reporting itself as on, with a colour and a brightness
+        // that had been frozen for hours, and the colour picker collapsed to
+        // black because that is what the stale value said.
+        //
+        // The read-back that follows still has the last word — it corrects a
+        // frame the device dropped, which is the whole reason it exists. This
+        // only means the interval between sending and confirming shows what we
+        // asked for rather than what used to be true.
+        if result.is_ok() {
+            let changed = {
+                let mut device = state.device_mut(&sku, &device_id).await;
+                pending.apply_optimistically(&mut device)
+            };
+            // The guard has to be out of scope first: notifying Home Assistant
+            // re-reads the device and would deadlock against it.
+            if changed {
+                if let Err(err) = state.notify_of_state_change(&device_id).await {
+                    log::error!("publishing the optimistic BLE state for {device_id}: {err:#}");
+                }
+            }
+        }
+
         let outcome = result.map_err(|err| err.to_string());
         for waiter in waiters {
             let _ = waiter.send(outcome.clone());
@@ -843,6 +918,7 @@ impl BleScheduler {
                 optional: query.is_speculative(),
                 // Pages are contiguous, so the first silence ends the list.
                 stop_if_unanswered: query.is_speculative(),
+                expect_prefix: Some(data_encoding::BASE64.encode(&query.expect_prefix())),
             }));
         }
         anyhow::ensure!(!ops.is_empty(), "nothing to do");
@@ -1269,6 +1345,71 @@ mod test {
             .await
             .expect("a breaker")
             .is_open(Instant::now()));
+    }
+
+    /// A query only accepts a reply that shares its header.
+    ///
+    /// Every Govee query and its reply start with the same two bytes, which is
+    /// precisely what distinguishes a reply from the receipt a *write* earns —
+    /// that carries the `33` opcode. Without the distinction the executor took
+    /// the first notification to arrive, and after a command the receipt beats
+    /// the reply: a light switched off reported itself as on until something
+    /// else polled it.
+    #[test]
+    fn a_query_only_accepts_a_reply_with_its_own_header() {
+        assert_eq!(Query::Power.expect_prefix(), vec![0xaa, 0x01]);
+        assert_eq!(Query::Brightness.expect_prefix(), vec![0xaa, 0x04]);
+        assert_eq!(Query::Color.expect_prefix(), vec![0xaa, 0x05]);
+        assert_eq!(Query::Segments(3).expect_prefix(), vec![0xaa, 0xa5, 0x03]);
+
+        // And it is the query frame's own header, not a second source of
+        // truth that could drift from it.
+        for query in [Query::Power, Query::Brightness, Query::Color, Query::Segments(2)] {
+            let frame = query.frame().unwrap();
+            let prefix = query.expect_prefix();
+            assert_eq!(&frame[..prefix.len()], &prefix[..], "{query:?}");
+        }
+
+        // A write receipt shares the opcode but not the direction byte, so it
+        // can never be mistaken for a reply.
+        let receipt = [0x33u8, 0x01, 0x00];
+        assert!(!receipt.starts_with(&Query::Power.expect_prefix()));
+    }
+
+    /// What was sent is believed until the device says otherwise.
+    #[test]
+    fn a_session_writes_what_it_asked_for_into_the_state() {
+        let mut device = Device::new("H613D", "AA:BB:CC:DD:EE:FF:00:06");
+
+        let mut pending = PendingOps::default();
+        pending.merge(&DeviceOp::LightPowerOn(true)).unwrap();
+        pending.merge(&DeviceOp::SetBrightness(60)).unwrap();
+        pending
+            .merge(&DeviceOp::SetColorRgb {
+                r: 0,
+                g: 255,
+                b: 0,
+            })
+            .unwrap();
+        assert!(pending.apply_optimistically(&mut device));
+
+        let status = device.device_state().expect("a state");
+        assert!(status.on);
+        assert_eq!(status.brightness, 60);
+        assert_eq!(status.color, DeviceColor { r: 0, g: 255, b: 0 });
+
+        // Switching off says nothing about colour, so nothing else is touched.
+        let mut off = PendingOps::default();
+        off.merge(&DeviceOp::LightPowerOn(false)).unwrap();
+        assert!(off.apply_optimistically(&mut device));
+
+        let status = device.device_state().expect("a state");
+        assert!(!status.on);
+        assert_eq!(
+            status.color,
+            DeviceColor { r: 0, g: 255, b: 0 },
+            "the colour it was showing is still the colour it has"
+        );
     }
 
     /// `exchange` is fed from two places -- `PendingOps::frames` for ordinary

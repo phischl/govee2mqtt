@@ -151,8 +151,21 @@ class BleSession:
         future: asyncio.Future[bytes] = loop.create_future()
 
         def _on_notify(_characteristic: Any, data: bytearray) -> None:
-            if not future.done():
-                future.set_result(bytes(data))
+            if future.done():
+                return
+            if op.expect_prefix and not bytes(data).startswith(op.expect_prefix):
+                # Not this query's answer. Keep waiting -- the timeout still
+                # bounds us. A Govee light receipts every write on the same
+                # handle, and that receipt beats the reply to a query issued
+                # straight after a command.
+                _LOGGER.debug(
+                    "[%s] ignoring notification %s, waiting for one starting %s",
+                    self._address,
+                    bytes(data)[:4].hex(),
+                    op.expect_prefix.hex(),
+                )
+                return
+            future.set_result(bytes(data))
 
         await client.start_notify(op.notify_char, _on_notify)
         try:
