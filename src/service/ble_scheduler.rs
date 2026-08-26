@@ -758,19 +758,47 @@ impl BleScheduler {
         address: &str,
         known_segments: Option<u32>,
     ) -> anyhow::Result<()> {
-        let mut queries = Query::ALL.to_vec();
-        if self.may_probe_segments(device_id, known_segments).await {
-            queries.extend(Query::discover_segments(known_segments));
-        }
-
+        // The device's actual state, in its own session. Segment discovery is
+        // deliberately *not* in here.
         let result = self
-            .exchange(state, device_id, sku, address, &[], &queries, "poll")
+            .exchange(state, device_id, sku, address, &[], &Query::ALL, "poll")
             .await;
 
         match &result {
             Ok(()) => self.note_success(device_id).await,
-            Err(err) => self.note_failure(device_id, err).await,
+            Err(err) => {
+                self.note_failure(device_id, err).await;
+                return result;
+            }
         }
+
+        // Discovery rides in a second session, and its failure is swallowed.
+        //
+        // It used to share the poll's session, which meant a speculative
+        // question could take the answer down with it: an H613D has no
+        // segments, so it ignores all six page queries, and on 2026-08-26 that
+        // was enough to blow the job budget. The device then had *no* state at
+        // all in Home Assistant -- not a missing segment count, no power, no
+        // colour, nothing -- because the useful part of the poll was thrown out
+        // with the speculative part.
+        //
+        // The `optional` and `stop_if_unanswered` flags exist to make silence
+        // cheap, but they live in the companion integration and the add-on
+        // cannot know whether it is running a version that has them. Splitting
+        // the sessions does not care: whatever discovery costs, and however it
+        // ends, the state poll has already succeeded. The connection is still
+        // open from the first exchange, so the second one usually costs no
+        // reconnect.
+        if self.may_probe_segments(device_id, known_segments).await {
+            let queries = Query::discover_segments(known_segments);
+            if let Err(err) = self
+                .exchange(state, device_id, sku, address, &[], &queries, "discovery")
+                .await
+            {
+                log::debug!("Segment discovery for {sku} {device_id} found nothing: {err:#}");
+            }
+        }
+
         result
     }
 

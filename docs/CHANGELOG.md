@@ -68,6 +68,11 @@ segment. Both were fixed by reading what the devices already say.
   `light.turn_on` went out as four separate messages two seconds apart. The lock now belongs to
   the batch rather than to each arriving command, which also collapses the read-back — twelve
   segments cost one status request instead of twelve.
+- **A speculative question can no longer take the answer with it.** Segment discovery shared the
+  state poll's Bluetooth session, so a device with no segments — which answers none of the page
+  queries — could burn the whole job budget and leave Home Assistant with *no* state for it at
+  all: no power, no colour, nothing. Discovery runs in its own session now and its failure is
+  swallowed.
 - **A shrinking segment count takes its entities with it.** Retraction was bounded by the current
   count, which made it a no-op precisely when it was needed: a device whose count had been too
   high and then corrected left every extra entity behind. It now retracts up to a fixed bound, so
