@@ -227,7 +227,41 @@ unavoidable for this family — the device can only be asked how many strings, n
 Confirmed at the same time: the app addresses this device as **fifteen** segments, not thirty.
 Setting "the last two bulbs" produced mask `0x6000` — bits 13 and 14, not 28 and 29.
 
-One case defeats both counts: the H7020, which a second string can be chained to, reports thirty
+### `AA 0F <n>` is the number of chained strings — settled 2026-08-26
+
+Some products take a second light string plugged into the first. Such a device exposes slots for
+the maximum it could ever drive — an H7020 reports thirty over `AA A5`, ten pages of three — while
+only the connected ones exist in hardware. Govee's own app shows the real number, and this is how
+it knows.
+
+**The app does not count the pages. It asks, then stops early.** Captured over Bluetooth: it sent
+`AA 0F`, got `01` back, and then read `AA A5 01` through `AA A5 05` and no further. Five pages of
+three is fifteen, which is exactly one string.
+
+**`AA 0F` is writable, and that proves it without buying a second string.** Sending `33 0F 02` —
+"two strings" — was receipted and the device then reported `AA A9`… no: `AA 0F 02`. Nothing else in
+its status changed, the ten `AA A5` pages included. The app, reopened, drew **thirty** bulbs in six
+rows of five where it had drawn fifteen in three. Restored with `33 0F 01`.
+
+So:
+
+```
+33 0F <strings>      set how many strings are chained
+AA 0F <strings>      read it back
+```
+
+and the app's segment count is `strings × 15`.
+
+**The per-string length is not on the wire.** Nothing the device answers says "fifteen"; the app
+knows that from the product. So a reader of these frames can learn how many strings are attached
+but not how long one is, and a per-SKU constant is unavoidable for this family. That is a real
+limit, not a gap in the capture — we watched the whole handshake.
+
+Worth noting what this also settles: the phantom slots are not a reporting bug. The device
+genuinely addresses thirty segments, accepts writes to all of them, and holds the values; fifteen
+of them simply have no bulbs on the end.
+
+One case defeats both counts: the H7020 reports thirty
 slots for fifteen bulbs whether or not anything is plugged in, and both sources agree on thirty. The
 extra slots accept writes and hold the value while driving nothing. `AA 0F <n>` appears only on
 that device and is the best candidate for the count of connected strings, on one observation of

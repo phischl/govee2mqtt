@@ -130,9 +130,10 @@ segment. Both were fixed by reading what the devices already say.
 
 ## Known limits
 
-- The Govee app treats an H7020 as fifteen segments while the device reports thirty slots, and
-  nothing it asks the device explains how it knows. Home Assistant still gets thirty segment
-  entities for one, of which the upper fifteen do nothing.
+- A chainable light string still gets one segment entity per *possible* segment rather than per
+  connected one. An H7020 reports thirty slots and drives fifteen, so half its entities do
+  nothing. The device does say how many strings are attached — `AA 0F` — but not how long one is,
+  so closing this needs a per-model constant.
 - Colour temperature on a segmented device still goes to the cloud — there is no segment
   equivalent for it.
 - Base image signatures are not verified during the add-on build. The bundled cosign is too old
