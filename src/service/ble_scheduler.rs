@@ -345,9 +345,22 @@ enum Query {
 impl Query {
     const ALL: [Query; 3] = [Query::Power, Query::Brightness, Query::Color];
 
-    /// However many segments a device turns out to have, one poll never asks
-    /// for more pages than this.
-    const MAX_DISCOVERY_PAGES: u32 = 6;
+    /// A bound on one poll's speculative sweep, not a statement about how many
+    /// segments a device may have.
+    ///
+    /// It can afford to be generous because discovery queries carry
+    /// `stop_if_unanswered`: the executor stops at the first page the device
+    /// does not answer, so naming forty pages costs a three-segment lamp
+    /// exactly what naming six did — the pages it has, plus one timeout.
+    ///
+    /// It has to be generous, because a device that answers *every* page it was
+    /// asked for is indistinguishable from one that was cut off. This was set
+    /// to 6 — eighteen segments — and a Bluetooth-only H6116 duly reported
+    /// eighteen, exactly the ceiling, which tells us nothing about what it
+    /// really has. An H7020 has thirty slots and would have been truncated to
+    /// eighteen with no sign that anything was missing. So the bound must sit
+    /// past any plausible device rather than at a comfortable-looking number.
+    const MAX_DISCOVERY_PAGES: u32 = 32;
 
     /// Whether an unanswered query is an acceptable outcome.
     ///
@@ -1103,6 +1116,12 @@ mod test {
 
         // Eight need three pages, so reach for a fourth.
         assert_eq!(Query::discover_segments(Some(8)).len(), 4);
+
+        // The ceiling must not be reachable by a real device, or a count that
+        // hit it could not be told from one that was cut off. An H7020's
+        // thirty slots need ten pages; the old ceiling of six silently lost
+        // twelve of them.
+        assert!(Query::discover_segments(Some(30)).len() > 10);
     }
 
     /// However many a device turns out to have, one poll stays bounded.
