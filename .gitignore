@@ -17,3 +17,6 @@ __pycache__/
 # a public fork, and .claude/ is local tooling.
 CLAUDE.md
 .claude/
+
+# Written by CI to stamp the release version into the binary (build.rs)
+.tag

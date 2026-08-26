@@ -52,6 +52,11 @@ jobs:
           tags: |
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=ref,event=branch,enable=${{ github.ref != 'refs/heads/main' }}
+            # Only used for the labels here -- the images themselves are pushed
+            # by digest and tagged in the merge job. Without it a tag build
+            # generates no metadata at all and annotates every run with
+            # "No Docker tag has been generated".
+            type=ref,event=tag,enable=${{ github.ref_type == 'tag' }}
             type=ref,event=pr
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -70,6 +75,20 @@ jobs:
         uses: baptiste0928/cargo-install@v3
         with:
           crate: "cross"
+      # `govee --version` reports what build.rs stamped in, and with nothing
+      # to go on build.rs derives it from the checked-out commit. On a release
+      # that is the "Tag ..." commit the Release workflow just made, not the
+      # code commit the tag is named after -- so the binary published as
+      # 2026.08.26-127e1540 announced itself as 2026.08.26-512d01b0. Exactly
+      # the mismatch that bit addon/config.yaml; see the addon job below.
+      #
+      # .tag is build.rs's own hook for this, inherited from upstream and never
+      # written by anything. cross mounts the workspace, so the build container
+      # sees it. Left absent on a branch, where deriving from the commit is
+      # right. Not an env var: cross does not pass those into the container.
+      - name: Stamp the release version into the binary
+        if: ${{ github.ref_type == 'tag' }}
+        run: echo "${{ github.ref_name }}" > .tag
       - name: Build executable
         run: ./scripts/build-cross.sh ${{ matrix.platform }}
       - name: Build No Push
@@ -225,6 +244,16 @@ jobs:
           registry: https://ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # addon/Dockerfile pins the binary to BUILD_VERSION, which the builder
+      # reads from addon/config.yaml. On a tag the merge job has just published
+      # that version; on a branch it names the last release, and right after
+      # the Release workflow commits a bump those images may still be building.
+      # This job only checks that the add-on build configuration is plausible,
+      # so which binary goes in does not matter -- ask for :latest and it
+      # cannot race.
+      - name: Build against the latest published image
+        run: |
+          sed -i 's/^version:.*/version: "latest"/' addon/config.yaml
       # See the note on the addon job above for why --cosign is absent.
       - name: Test Build Home Assistant Add On
         uses: home-assistant/builder@2026.02.1

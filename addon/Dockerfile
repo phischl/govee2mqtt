@@ -1,7 +1,20 @@
 ARG BUILD_FROM
 # Must point at this fork's image, otherwise the add-on ships upstream's
 # binary and none of the Bluetooth work is present.
-FROM ghcr.io/phischl/govee2mqtt:latest AS govee2mqtt
+#
+# Pinned to BUILD_VERSION rather than :latest so a tagged add-on is
+# reproducible. The builder reads BUILD_VERSION from addon/config.yaml, where
+# scripts/apply-tag.sh has stamped the git tag, and Container Build publishes
+# the standalone image under exactly that tag from the same commit. With
+# :latest the add-on contained whatever main had built most recently, so
+# rebuilding an old tag produced a different image.
+#
+# The addon job needs the merge job, so the tag is always published before this
+# runs. A version that was never published fails the build with "manifest
+# unknown" -- which is the honest outcome; the alternative is silently shipping
+# a binary from a different commit.
+ARG BUILD_VERSION
+FROM ghcr.io/phischl/govee2mqtt:${BUILD_VERSION} AS govee2mqtt
 FROM $BUILD_FROM
 
 # Home Assistant's base image lags Debian's security updates -- it shipped

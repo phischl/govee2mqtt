@@ -92,9 +92,14 @@ segment. Both were fixed by reading what the devices already say.
 - Everything publishes under `ghcr.io/phischl/govee2mqtt`. `addon/Dockerfile` pulled the binary
   from upstream's image, so the fork's add-on would otherwise have shipped upstream's binary with
   none of this in it.
-- The add-on was briefly published under the wrong version — the release job re-derived it from
-  the release commit rather than the tag. Releases are now verified against the registry rather
-  than the workflow's exit code.
+- Versions come from the tag, everywhere. Three places derived one from the checked-out commit
+  instead, which on a release is the "Tag …" commit and not the code commit the tag is named
+  after: the add-on was published under a version its own `config.yaml` did not ask for, and the
+  binary announced a version nobody could look up. Releases are now verified against the
+  registry rather than the workflow's exit code.
+- A tagged add-on is reproducible. `addon/Dockerfile` copied the binary out of `:latest`, so an
+  add-on contained whatever `main` had built most recently and rebuilding an old tag produced a
+  different image. It is pinned to the tag's own image now.
 - Trivy scans the working tree and all three published images. Its first run moved the runtime
   image from `distroless/cc-debian12` to `static-debian13` — every glibc CVE came from a library
   the static musl binary never calls — and the add-on base from Debian 12, end of life since
@@ -109,5 +114,6 @@ segment. Both were fixed by reading what the devices already say.
 - Per-segment *brightness* can be read but not written; the command for it is not known.
 - Colour temperature on a segmented device still goes to the cloud — there is no segment
   equivalent for it.
-- A tagged add-on is not reproducible: `addon/Dockerfile` copies the binary out of `:latest`
-  rather than the tag's own image.
+- Base image signatures are not verified during the add-on build. The bundled cosign is too old
+  for what sigstore now requires, and bumping the builder is not possible — the monolithic
+  action was removed. Migrating to the composable builder actions would restore it.
