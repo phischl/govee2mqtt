@@ -1016,6 +1016,15 @@ impl BleScheduler {
             };
 
             let packet = decode_notification(GENERIC_LIGHT, &bytes);
+            // Every notification, not only the ones with no handler. Chasing a
+            // colour that kept coming back black meant guessing at what had
+            // been applied, because a packet that decoded cleanly vanished
+            // into the state without a word. Knowing what we could not read is
+            // half a diagnosis.
+            log::debug!(
+                "BLE notification from {device_id}: {} -> {packet:?}",
+                bytes.iter().map(|b| format!("{b:02X} ")).collect::<String>()
+            );
             let mut device = state.device_mut(sku, device_id).await;
             match packet {
                 GoveeBlePacket::NotifyDevicePower(power) => {
