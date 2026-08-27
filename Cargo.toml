@@ -2,6 +2,9 @@
 name = "govee"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+description = "Bridge Govee devices into Home Assistant over Bluetooth, LAN and Govee's cloud"
+repository = "https://github.com/phischl/govee2mqtt"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
