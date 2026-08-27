@@ -170,6 +170,12 @@ segment. Both were fixed by reading what the devices already say.
 - A tagged add-on is reproducible. `addon/Dockerfile` copied the binary out of `:latest`, so an
   add-on contained whatever `main` had built most recently and rebuilding an old tag produced a
   different image. It is pinned to the tag's own image now.
+- The add-on image no longer carries `tempio`, a Go binary Home Assistant's base ships for
+  rendering config templates. This add-on renders none, and nothing else in the image referenced
+  it — but being a static Go binary it brought its own copies of `golang.org/x/crypto` and the Go
+  standard library, and those were **every** fixable critical or high finding a scan reported
+  against the image: forty-three down to twenty-four, and none of the rest has a fix available
+  from Debian.
 - Trivy scans the working tree and all three published images. Its first run moved the runtime
   image from `distroless/cc-debian12` to `static-debian13` — every glibc CVE came from a library
   the static musl binary never calls — and the add-on base from Debian 12, end of life since

@@ -26,6 +26,19 @@ RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# Home Assistant's base image ships tempio, a Go binary for rendering config
+# templates from add-on options. Ours renders nothing -- run.sh reads its
+# settings from the environment through bashio -- and nothing else in the image
+# references it: /etc/services.d is empty and no init script mentions it.
+#
+# It is worth removing rather than tolerating. Being a static Go binary, it
+# carries its own copies of golang.org/x/crypto and the Go standard library,
+# and those account for every fixable critical or high finding Trivy reports
+# against this image -- nineteen of them, none of which we can patch, because
+# we do not build it. The Debian packages alongside have no fix available at
+# all, which is why the apt-get upgrade above is the only other lever.
+RUN rm -f /usr/bin/tempio
+
 COPY run.sh /run.sh
 COPY --from=govee2mqtt /app/govee /app/
 COPY --from=govee2mqtt /app/assets /app/assets/
