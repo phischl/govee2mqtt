@@ -355,6 +355,27 @@ other observations line up with it: an H7020 once put a 27-character non-base64 
 segments were set that way, and an H6054's colour temperature came back correctly. So encryption
 is a property of the radio link, not of the protocol.
 
+**It is not the scheme homebridge-govee documents.** That project describes an AES-128-GCM
+wrapper introduced by newer models: an `e7 11` handshake on connect, then **36-byte** data frames
+of `counter(4) ++ GCM{20-byte frame} ++ tag(12)`, with fixed keys and a per-device key derived
+from the SKU and MAC, so no cloud lookup is needed. Worth knowing about, and implementable if a
+device turns up that uses it.
+
+Neither of ours does. Reassembling the L2CAP fragments properly — the first attempt did not, and
+showed the first twenty bytes of what could have been a longer write — every frame is exactly
+**20 bytes**, 529 of them on one device and 304 on the other, and `e7 11` appears nowhere. So the
+frame size is preserved, which rules out a wrapper that adds a counter and a tag.
+
+**The likeliest cause is a per-device setting, not the model.** The Govee app offers
+*Gerätesicherheit* / device security per device — "after activation the device can only be used by
+the current account" — and it is switched on for both. That would explain why `supportEnc` in the
+metadata cannot be the whole story: it presumably says the model *can*, while the toggle says this
+one *does*. Untested; turning it off on one device and re-capturing would settle it in minutes.
+
+One structural hint, if anyone picks this up: bytes 16..18 are identical across many frames in
+both directions (`ab d6 fe` on one device) while byte 19 varies. Something in there is not
+covered by whatever transformation is applied.
+
 **What it costs us.** A device that encrypts cannot be driven over Bluetooth at all, and an
 attempt would fail silently: it accepts the write and ignores it, exactly as a segmented device
 does with `33 05 0d`. Both encrypted devices here are cloud-capable and both are out of proxy
