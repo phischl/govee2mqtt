@@ -83,7 +83,7 @@ rather than an oversight:
   back after every press. Both are set from the Govee app. Toggles that *do* report — a device's
   `powerSwitch`, and the `light1`…`light3` of a lamp built as several heads — are useful and stay.
 
-* **Music modes, DIY scenes and saved snapshots.** All were offered as effects on every light. A music mode
+* **Music modes, saved snapshots and DIY scenes.** All were offered as effects on every light. A music mode
   makes the device listen to its own microphone, so it does nothing in a quiet room and nothing
   an automation can rely on; a DIY scene is drawn in the Govee app against one device's segment
   layout, and is edited and deleted there, as is a saved snapshot. What they share is that Govee

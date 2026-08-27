@@ -132,8 +132,9 @@ segment. Both were fixed by reading what the devices already say.
   listen to its own microphone, so it does nothing in a quiet room; a DIY scene is drawn in the
   Govee app against one device's segment layout. Neither is ever reported back — Govee names no
   active scene in any status packet, on any channel — so both could be selected, never
-  confirmed, and were silently forgotten at the next poll. Govee's own saved snapshots go with
-  them, for the same reason. They are hidden, not removed: an automation that already names one
+  confirmed, and were silently forgotten at the next poll. Govee's saved snapshots go with them,
+  for the same reason — and on this account they turned out to be the only ones of the three
+  that any device actually had. They are hidden, not removed: an automation that already names one
   keeps working.
 - **Colour temperature works on a segmented device over Bluetooth.** Such a device receipts the
   whole-device frame and ignores it, so it could not be set to white over the radio at all — a
