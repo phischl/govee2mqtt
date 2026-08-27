@@ -336,8 +336,14 @@ H7020. So it is the repetition that matters, not a particular keep-alive frame �
 **`AA 36` is power per lamp.** Measured on an H60B2 on 2026-08-27: switched on it reports
 `AA 36 01 01 01`, switched off `AA 36 00 00 00`. That device is three separate lamp heads in one
 housing, and Govee's own metadata exposes three `lightN` toggles for it, so the three bytes are
-the three lamps. An H7093 reports three as well where only two spots are attached, so the field
-may be fixed-width rather than sized to the hardware — not settled.
+the three lamps. It is sent only by devices built that way — an H7093 with two spots never sends
+it at all, and neither does anything else here.
+
+*A caution about method, since it nearly went in the other direction.* This was first written up
+with "an H7093 reports three as well", which would have made the field fixed-width and the reading
+useless. The frame had been grepped out of a capture of the **account topic**, which carries every
+device on the account, without filtering by device — and it belonged to the H60B2. Filter first;
+a capture of a shared channel is not a capture of one device.
 
 This matters for **colour temperature on a segmented device**, which is still unsolved. Watching
 the Govee app on four products: an H60B2 sets it per lamp, an H6054 sets it per *bar* even when
