@@ -201,6 +201,40 @@ So the mask reaches at least byte 7, twenty-four segments. Setting brightness le
 segment's colour alone, and setting colour leaves its brightness alone — they are independent
 commands over the same segments, and both can travel in one `ptReal`.
 
+### Writing a segment's colour temperature
+
+```
+33 05 15 01 ff ff ff <kelvin be16> <r> <g> <b> <mask, little-endian from byte 12>
+```
+
+The same sub-command as the colour write, with `ff ff ff` where the colour goes — exactly the
+marker the whole-device frame uses. Kelvin follows, then the RGB approximation the app appends,
+then the mask in the colour command's position.
+
+Transcribed from Bluetooth HCI captures of the Govee app on 2026-08-27, identical on two devices:
+
+| Device | Slider | Frame |
+|---|---|---|
+| H6072 | cool end | `33 05 15 01 ff ff ff 23 28 d9 e1 ff ff 00` — 9000 K, all eight segments |
+| H6072 | warm end | `33 05 15 01 ff ff ff 07 d0 ff 8d 0b ff 00` — 2000 K |
+| H6072 | middle | `33 05 15 01 ff ff ff 15 e0 ff ef e1 ff 00` — 5600 K |
+| H6054 | one bar | `33 05 15 01 ff ff ff 1d 4c ee ef ff c0 0f` — 7500 K, mask `0x0fc0` |
+
+**Whole-device colour temperature on a segmented device is this command with every segment
+named.** The app's "whole" tab on an eight-segment H6072 sends `0x00ff`. It does not send
+`33 05 0d`, which such a device receipts and ignores — so before this was captured, a segmented
+device could not be set to white over the radio at all.
+
+**The mask granularity is the lamp, not the segment.** Selecting a single segment of an H6054 and
+moving the slider sends a mask over all six segments of that *bar*. The app offers per-lamp colour
+temperature on devices built as several lamps and whole-device only on the rest, which matches
+what the hardware can do: RGBIC segments within one strip share the white channel or have none.
+
+**A warm white and a plain white share their first seven bytes.** The Kelvin field is the only
+thing separating `33 05 15 01 ff ff ff <kelvin>` from a colour write of `ff ff ff`, so a decoder
+has to refuse a colour frame whose bytes 7..12 are non-zero — the same trap the whole-device pair
+sets, one size down.
+
 ### `AA 05 15` means "I have segments"
 
 Present in the status of every segmented device on one account and in none of the others. It is
@@ -209,6 +243,12 @@ segments entirely for at least one segmented product.
 
 Its payload byte is `00` on some devices and `01` on others, with no pattern we can see, so it
 is carried and not interpreted.
+
+**It also carries colour temperature per lamp**, which we do not yet read. An H6054 with both bars
+at 3200 K answers `aa 05 15 01 0c 80 0c 80` — the marker byte, then one big-endian Kelvin value
+per bar. With nothing set it answers zeroes. So the frame is
+`aa 05 15 <mode> <kelvin be16> × units`, and it is also the only place a device states how many
+lamp units it has without us having to infer it.
 
 Note the trap: `aa 05 15 01 …` fits the colour layout `aa 05 <mode> <r> <g> <b>` and will
 happily decode as a near-black colour. A decoder has to refuse mode `0x15` explicitly.

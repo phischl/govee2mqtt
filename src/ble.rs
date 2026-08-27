@@ -369,6 +369,17 @@ impl PacketManager {
                     "segment colour command is too short: {} bytes",
                     body.len()
                 );
+                // Everything between the colour and the mask has to be zero,
+                // and refusing otherwise is what separates this from
+                // `SetSegmentColorTemperature`: that command is the same
+                // sub-command with `ff ff ff` for the colour and a Kelvin value
+                // in exactly these bytes. Without the check a warm white read
+                // back as plain white, which is the segment-sized version of the
+                // trap `Kelvin` and `OptionalKelvin` exist for.
+                anyhow::ensure!(
+                    body[3..SEGMENT_MASK_AT - 4].iter().all(|b| *b == 0),
+                    "not a segment colour command: bytes 7..12 are not zero"
+                );
 
                 let mut mask = [0u8; 8];
                 mask[..SEGMENT_MASK_BYTES]
@@ -380,6 +391,50 @@ impl PacketManager {
                     b: body[2],
                     mask: u64::from_le_bytes(mask),
                 }))
+            },
+        ));
+
+        all_codecs.push(PacketCodec::new(
+            &[GENERIC_LIGHT],
+            |value: &SetSegmentColorTemperature| {
+                anyhow::ensure!(
+                    value.mask != 0,
+                    "a segment colour temperature command that names no segment does nothing"
+                );
+                anyhow::ensure!(
+                    value.mask >> (SEGMENT_MASK_BYTES * 8) == 0,
+                    "segment mask {:#x} does not fit in {SEGMENT_MASK_BYTES} bytes",
+                    value.mask
+                );
+
+                let [hi, lo] = value.kelvin.get().to_be_bytes();
+                // `ff ff ff` where the colour goes: the same marker the
+                // whole-device frame uses to mean "a temperature, not a
+                // colour". Bytes 9..12 are the app's RGB approximation, which
+                // we leave at zero as we do for the whole-device frame.
+                let mut bytes = vec![0x33, 0x05, 0x15, 0x01, 0xff, 0xff, 0xff, hi, lo];
+                bytes.resize(SEGMENT_MASK_AT, 0);
+                bytes.extend_from_slice(&value.mask.to_le_bytes()[..SEGMENT_MASK_BYTES]);
+                Ok(finish(bytes))
+            },
+            |data| {
+                let body = notification_body(data, &[0x33, 0x05, 0x15, 0x01, 0xff, 0xff, 0xff])?;
+                anyhow::ensure!(
+                    body.len() >= SEGMENT_MASK_AT - 7 + SEGMENT_MASK_BYTES,
+                    "segment colour temperature command is too short: {} bytes",
+                    body.len()
+                );
+
+                let mut mask = [0u8; 8];
+                mask[..SEGMENT_MASK_BYTES]
+                    .copy_from_slice(&body[SEGMENT_MASK_AT - 7..][..SEGMENT_MASK_BYTES]);
+
+                Ok(GoveeBlePacket::SetSegmentColorTemperature(
+                    SetSegmentColorTemperature {
+                        kelvin: Kelvin::new(u16::from_be_bytes([body[0], body[1]]))?,
+                        mask: u64::from_le_bytes(mask),
+                    },
+                ))
             },
         ));
 
@@ -869,6 +924,61 @@ impl SetSegmentColorRgb {
 /// mask where the colour frame keeps it, and that position is payload here.
 pub const SEGMENT_BRIGHTNESS_MASK_AT: usize = 5;
 
+/// Set the colour temperature of individual segments.
+///
+/// ```text
+/// 33 05 15 01 ff ff ff <kelvin be16> <r> <g> <b> <mask, little-endian from byte 12>
+/// ```
+///
+/// The same sub-command as [`SetSegmentColorRgb`], with `ff ff ff` where the
+/// colour goes — exactly the trick the whole-device frame uses, where
+/// `33 05 0d ff ff ff <kelvin>` means "not a colour, a temperature". The mask
+/// sits where the colour command keeps it.
+///
+/// Taken from Bluetooth HCI captures of the Govee app on 2026-08-27, on an
+/// H6072 and an H6054, and identical on both. The app sends 2000 K at the
+/// warm end of its slider and 9000 K at the cool end, which matches the range
+/// Govee's own metadata reports for these devices.
+///
+/// **Whole-device colour temperature on a segmented device is this command with
+/// every segment named**, not `33 05 0d`: an H6072 with eight segments answers
+/// its "whole" tab with a mask of `0x00ff`. That is worth knowing because a
+/// segmented device receipts `33 05 0d` and ignores it, so before this was
+/// captured such a device could not be set to white over the radio at all.
+///
+/// The RGB companion at bytes 9..12 is the approximation the app appends —
+/// 2000 K → `ff 8d 0b`, 9000 K → `d9 e1 ff`. As with the whole-device frame we
+/// send zeroes there: the values follow no approximation we could reproduce,
+/// and the whole-device frame works without them.
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub struct SetSegmentColorTemperature {
+    pub kelvin: Kelvin,
+    pub mask: u64,
+}
+
+impl SetSegmentColorTemperature {
+    /// Build a command for a set of segment indices.
+    pub fn for_segments(
+        segments: impl IntoIterator<Item = u32>,
+        kelvin: u16,
+    ) -> anyhow::Result<Self> {
+        let mut mask = 0u64;
+        for segment in segments {
+            let bit = u64::from(segment);
+            anyhow::ensure!(
+                bit < (SEGMENT_MASK_BYTES * 8) as u64,
+                "segment {segment} is past the {} this frame can address",
+                SEGMENT_MASK_BYTES * 8
+            );
+            mask |= 1 << bit;
+        }
+        Ok(Self {
+            kelvin: Kelvin::new(kelvin)?,
+            mask,
+        })
+    }
+}
+
 /// Set the brightness of individual segments.
 ///
 /// ```text
@@ -1060,6 +1170,7 @@ pub enum GoveeBlePacket {
     NotifySegmentColors(NotifySegmentColors),
     SetSegmentColorRgb(SetSegmentColorRgb),
     SetSegmentBrightness(SetSegmentBrightness),
+    SetSegmentColorTemperature(SetSegmentColorTemperature),
     NotifyChainedStrings(NotifyChainedStrings),
     NotifySegmentMode(NotifySegmentMode),
     SetHumidifierNightlight(SetHumidifierNightlightParams),
@@ -1506,6 +1617,74 @@ a3 ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5c
                 GoveeBlePacket::NotifyChainedStrings(value),
             );
         }
+    }
+
+    /// Per-segment colour temperature, transcribed from the Govee app.
+    ///
+    /// Every row is a frame the app put on the wire, byte for byte, out of
+    /// Bluetooth HCI captures taken on 2026-08-27. Two devices, identical
+    /// format. The app's slider runs 2000 K to 9000 K, which is the range
+    /// Govee's metadata reports for both.
+    ///
+    /// The app also fills bytes 9..12 with an RGB approximation of the
+    /// temperature; we send zeroes, as the whole-device frame already does.
+    #[test]
+    fn segment_colour_temperature_matches_the_app() {
+        let cases = [
+            // H6072, "whole" tab: all eight segments, cool end.
+            (
+                (0..8).collect::<Vec<u32>>(),
+                9000u16,
+                "33051501ffffff2328 000000 ff00 0000000000 29",
+            ),
+            // The same, warm end.
+            (
+                (0..8).collect(),
+                2000,
+                "33051501ffffff07d0 000000 ff00 0000000000 f5",
+            ),
+            // H6054, one bar: the app names all six of its segments even when
+            // a single one is selected.
+            (
+                (6..12).collect(),
+                7500,
+                "33051501ffffff1d4c 000000 c00f 0000000000 43",
+            ),
+        ];
+
+        for (segments, kelvin, expected) in cases {
+            let value = SetSegmentColorTemperature::for_segments(segments.clone(), kelvin).unwrap();
+            assert_eq!(
+                hex(&Base64HexBytes::encode_for_sku(GENERIC_LIGHT, &value).unwrap()),
+                expected.replace(' ', ""),
+                "encoding {kelvin}K over {segments:?}"
+            );
+            round_trip(
+                GENERIC_LIGHT,
+                &value,
+                GoveeBlePacket::SetSegmentColorTemperature(value),
+            );
+        }
+    }
+
+    /// Colour and colour temperature share a sub-command and are told apart by
+    /// `ff ff ff`, exactly as the whole-device frames are.
+    #[test]
+    fn segment_colour_and_temperature_are_told_apart_by_the_marker() {
+        let colour = SetSegmentColorRgb::for_segments([0u32], (0xff, 0xff, 0xff)).unwrap();
+        let warm = SetSegmentColorTemperature::for_segments([0u32], 2700).unwrap();
+
+        let colour = encode_for_generic_light(&colour).unwrap();
+        let warm = encode_for_generic_light(&warm).unwrap();
+
+        // Both are sub-command 01 and both carry ff ff ff, so the Kelvin field
+        // is the only thing separating white from a temperature -- the same
+        // trap the whole-device frames set, and the reason `Kelvin` refuses
+        // zero while `OptionalKelvin` does not.
+        assert_eq!(&colour[..7], &warm[..7]);
+        assert_eq!(&colour[7..9], &[0, 0], "white leaves the Kelvin field zero");
+        assert_eq!(&warm[7..9], &2700u16.to_be_bytes());
+        assert_eq!(colour[SEGMENT_MASK_AT], warm[SEGMENT_MASK_AT]);
     }
 
     /// Per-segment brightness, from the Govee app's own Bluetooth traffic.

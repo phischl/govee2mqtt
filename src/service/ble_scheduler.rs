@@ -19,7 +19,7 @@ use crate::ble::{
     decode_notification, query_device_brightness, query_device_color, query_device_power,
     query_segment_colors, Base64HexBytes, GoveeBlePacket, Kelvin, NotifySegmentColors,
     SetDeviceBrightness, SetDeviceColorRgb, SetDeviceColorTemperature, SetDevicePower,
-    SetSegmentColorRgb, GENERIC_LIGHT, SEGMENTS_PER_PAGE,
+    SetSegmentColorRgb, SetSegmentColorTemperature, GENERIC_LIGHT, SEGMENTS_PER_PAGE,
 };
 use crate::lan_api::DeviceColor;
 use crate::service::ble_bridge::{
@@ -344,9 +344,18 @@ impl PendingOps {
                 _ => frames.push(encode(&SetDeviceColorRgb { r, g, b })?),
             }
         } else if let Some(kelvin) = self.kelvin {
-            frames.push(encode(&SetDeviceColorTemperature {
-                kelvin: Kelvin::new(kelvin)?,
-            })?);
+            // Same shape as colour: a segmented device ignores the whole-device
+            // frame, so the temperature goes out as a mask over every segment.
+            // That is what the Govee app does — an H6072 answers its "whole
+            // device" tab with a mask of every one of its eight segments.
+            match segments {
+                Some(count) if count > 0 => frames.push(encode(
+                    &SetSegmentColorTemperature::for_segments(0..count, kelvin)?,
+                )?),
+                _ => frames.push(encode(&SetDeviceColorTemperature {
+                    kelvin: Kelvin::new(kelvin)?,
+                })?),
+            }
         }
 
         Ok(frames)
@@ -1373,6 +1382,31 @@ mod test {
             .await
             .expect("a breaker")
             .is_open(Instant::now()));
+    }
+
+    /// A segmented device gets its colour temperature as a mask too.
+    ///
+    /// It ignores the whole-device frame — receipts it and does nothing — so
+    /// before the segment command was captured such a device could not be set
+    /// to white over the radio at all. The Govee app does exactly this: its
+    /// "whole device" tab on an eight-segment H6072 sends a mask of all eight.
+    #[test]
+    fn colour_temperature_on_a_segmented_device_names_every_segment() {
+        let mut pending = PendingOps::default();
+        pending.merge(&DeviceOp::SetColorTemperature(2700)).unwrap();
+
+        // Both cases carry the implicit power-on first; the temperature is
+        // the frame after it.
+        let plain = frames_hex(&pending);
+        assert_eq!(plain.len(), 2);
+        assert!(plain[1].starts_with("33050d"), "{}", plain[1]);
+
+        // With eight segments, the segment frame with every bit set.
+        let segmented = frames_hex_for(&pending, Some(8));
+        assert_eq!(segmented.len(), 2);
+        let ct = &segmented[1];
+        assert!(ct.starts_with("33051501ffffff0a8c"), "{ct}");
+        assert_eq!(&ct[24..28], "ff00", "a mask over all eight: {ct}");
     }
 
     /// A query only accepts a reply that shares its header.

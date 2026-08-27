@@ -123,6 +123,11 @@ segment. Both were fixed by reading what the devices already say.
 
 ## Robustness
 
+- **Colour temperature works on a segmented device over Bluetooth.** Such a device receipts the
+  whole-device frame and ignores it, so it could not be set to white over the radio at all — a
+  Bluetooth-only strip had no way to do it. The command turns out to be the segment write with a
+  Kelvin value in place of the colour, and "the whole device" is that command naming every
+  segment, which is exactly what the Govee app sends.
 - **A segmented light shows its first segment's colour** when it reports none of its own. Such a
   device does not really have one colour, and a Bluetooth-only strip does not even pretend —
   it answers the colour query with the segment marker, leaving Home Assistant a colour picker
@@ -169,8 +174,6 @@ segment. Both were fixed by reading what the devices already say.
 
 ## Known limits
 
-- Colour temperature on a segmented device still goes to the cloud — there is no segment
-  equivalent for it.
 - Base image signatures are not verified during the add-on build. The bundled cosign is too old
   for what sigstore now requires, and bumping the builder is not possible — the monolithic
   action was removed. Migrating to the composable builder actions would restore it.

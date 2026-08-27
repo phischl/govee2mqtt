@@ -23,17 +23,20 @@ impl BleTransport {
     /// The operations we have verified frame encodings for.
     fn handles(device: &Device, op: &DeviceOp) -> bool {
         if device.is_segmented() {
-            // A segmented device ignores the whole-strip colour write, so this
-            // used to decline everything but power and let the cloud have it.
-            // The segment command is known now and the scheduler sends
-            // colour as a mask over every segment — but only
-            // when it knows how many there are, and colour temperature still
-            // has no segment equivalent.
+            // A segmented device ignores the whole-strip colour and colour
+            // temperature writes -- it receipts them and does nothing -- so
+            // this used to decline everything but power and let the cloud have
+            // it. Both segment commands are known now and the scheduler sends
+            // either as a mask over every segment, which is exactly what the
+            // Govee app does for its own "whole device" tab. It still needs to
+            // know how many segments there are to build that mask.
             return match op {
                 DeviceOp::PowerOn(_) | DeviceOp::LightPowerOn(_) | DeviceOp::SetBrightness(_) => {
                     true
                 }
-                DeviceOp::SetColorRgb { .. } => device.segment_count().is_some_and(|n| n > 0),
+                DeviceOp::SetColorRgb { .. } | DeviceOp::SetColorTemperature(_) => {
+                    device.segment_count().is_some_and(|n| n > 0)
+                }
                 _ => false,
             };
         }
