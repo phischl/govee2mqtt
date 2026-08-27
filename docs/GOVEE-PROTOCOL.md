@@ -308,6 +308,7 @@ Observed in status replies. All checksums verify.
 | `AA 12 FF 64 00 00 80 <n> …` | several; last byte differs per device |
 | `AA 23 FF <00 00 00 80> × 4` | several |
 | `AA 41 <n>` | some segmented devices, values `01` and `02` |
+| `AA 36 <n> <n> <n>` | power per lamp — see below |
 | `AA A9 …` | one two-bar device only; see the segment-write section |
 | `AA 54` | as an unsolicited `ptReal` |
 | `AA 0F <n>` | one chainable device only |
@@ -331,6 +332,22 @@ H7020. So it is the repetition that matters, not a particular keep-alive frame �
 §4.4 of the working notes was looking for and would not have found. `AA 14` answers with six bytes that look like an address. The app also writes
 `33 09 10 24 25 03 01 02 00 1A 08 EA 07 …` right after connecting, where `EA 07` is `0x07EA` =
 2026 little-endian: a clock synchronisation.
+
+**`AA 36` is power per lamp.** Measured on an H60B2 on 2026-08-27: switched on it reports
+`AA 36 01 01 01`, switched off `AA 36 00 00 00`. That device is three separate lamp heads in one
+housing, and Govee's own metadata exposes three `lightN` toggles for it, so the three bytes are
+the three lamps. An H7093 reports three as well where only two spots are attached, so the field
+may be fixed-width rather than sized to the hardware — not settled.
+
+This matters for **colour temperature on a segmented device**, which is still unsolved. Watching
+the Govee app on four products: an H60B2 sets it per lamp, an H6054 sets it per *bar* even when
+one segment is selected, and an H6072 and H7020 only for the whole device. So the granularity is
+the lamp with its own white LEDs, not the segment — RGBIC segments within one strip share the
+white channel or have none. Two of those devices describe their units on the wire (`AA A9 00` on
+the H6054, `AA 36` here) and the others do not, so a per-model rule may still be unavoidable.
+
+None of that is actionable until the write frame is known, and the way to find it is the way
+per-segment brightness was found: a Bluetooth HCI capture of the app moving the slider.
 
 **The app queries far more than it displays**, and its opening burst is the cheapest catalogue of
 valid queries there is: `AA 06`, `AA 07`, `AA 21`, `AA 20`, `AA 14`, `AA 23`, `AA 11`, `AA 12`,
