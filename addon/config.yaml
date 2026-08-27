@@ -1,6 +1,6 @@
 name: Govee to MQTT Bridge
 image: ghcr.io/phischl/govee2mqtt-{arch}
-version: "2026.08.27-79c90af5"
+version: "2026.08.27-f8e5e84b"
 slug: govee2mqtt
 description: Control Govee Devices
 url: https://github.com/phischl/govee2mqtt
