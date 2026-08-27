@@ -547,6 +547,41 @@ HCI log will show the payload.
 
 ---
 
+## Capturing what the app sends
+
+Every frame this document holds that could not be guessed — per-segment brightness, per-segment
+colour temperature — came out of a Bluetooth capture of the Govee app, in minutes, after weeks of
+probing a live lamp had produced nothing. It is the tool of first resort, not last.
+
+**The cloud is no substitute.** The app publishes to a device's own MQTT topic, which the broker
+will not let a second client subscribe to, and all the account topic carries is a receipt with the
+payload zeroed. You can see *that* the app sent something in the `05` family; you cannot see what.
+
+1. On the phone: Developer options → **Bluetooth HCI snoop log** → enabled. Reboot if it asks.
+2. Force-close the Govee app, so opening it makes a fresh connection and you capture the
+   handshake as well as the commands.
+3. Open the app and check the header shows the **Bluetooth** symbol, not Wi-Fi. Over Wi-Fi the
+   phone's radio is not involved and the capture stays empty however well the device responds —
+   which is exactly what happened the first time, with a garden light out of range.
+4. Drive the device. Extremes first: a slider pushed fully one way and then the other identifies
+   itself in the capture without needing to know what value the app meant. On a device with
+   several lamps, give each a *different* extreme, or you see the command but not the addressing.
+5. Take a bug report and look under `FS/data/log/bt/btsnoop_hci.log`. The log is cumulative, so
+   one report covers a whole session.
+
+Then:
+
+```sh
+scripts/parse-btsnoop.py btsnoop_hci.log --connections           # who was talking
+scripts/parse-btsnoop.py btsnoop_hci.log --writes --device AA:…  # what was sent
+```
+
+The script attributes each frame to its connection and reassembles L2CAP fragments. Both matter
+and neither is optional: a phone holds several links at once, so grepping a whole capture mixes
+devices — that is how a frame from a floor lamp was once written up as coming from a garden spot —
+and a write longer than twenty bytes arrives in pieces, so reading only the first packet shows the
+first twenty bytes of it.
+
 ## Method notes
 
 Four traps that each cost real time here, in the hope they cost someone else less.

@@ -16,6 +16,10 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "python-tests/*" = ["PLR2004"]  # literal expectations are the point of a test
+# A wire-format parser is byte offsets and header lengths all the way down, and
+# naming each one would obscure rather than explain; the layout is in the
+# docstring and in docs/GOVEE-PROTOCOL.md.
+"scripts/*" = ["PLR2004", "PLR0912"]
 
 [tool.pytest.ini_options]
 testpaths = ["python-tests"]
