@@ -1133,8 +1133,6 @@ impl GoveeApiClient {
 
 #[cfg(test)]
 mod test {
-    use super::*;
-
     /// A group made in the Govee app is not a device.
     ///
     /// The official API returns them alongside real ones — an id of `4981418`
