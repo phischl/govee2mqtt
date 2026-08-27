@@ -83,6 +83,44 @@ Notes that cost time to learn:
   loses the colour it just set. Treat an `aa 05` carrying neither RGB nor Kelvin as carrying no
   information: a lit device is never black, and an unlit one says so through `aa 01`.
 
+## 3a. Two colour dialects
+
+Not every light takes the same colour sub-command, and the difference is one
+byte. Captured from the Govee app on 2026-08-27 and verified against the
+hardware:
+
+| | `0x0d` | `0x02` |
+|---|---|---|
+| Colour | `33 05 0d <r> <g> <b>` | `33 05 02 <r> <g> <b>` |
+| Colour temperature | `33 05 0d ff ff ff <kelvin be16>` | `33 05 02 ff ff ff 01 <r> <g> <b>` |
+| Reply | `aa 05 0d <r> <g> <b> <kelvin be16>` | `aa 05 02 <r> <g> <b> 00 <r> <g> <b>` |
+| Seen on | H601B and most others | H613D |
+
+Three things worth knowing.
+
+**A `0x02` device has no Kelvin field at all.** The app sends `ff ff ff` as the
+white marker, then `01`, then the colour that temperature renders as. Its own
+values match the Tanner-Helland approximation closely — `ff 8d 0b` at the warm
+end, `d9 e1 ff` at the cool one — which is *not* true of the companion RGB a
+`0x0d` device appends, where the same approximation does not reproduce the app.
+Different field, different answer; do not carry one result over to the other.
+
+**The reply repeats the colour where the Kelvin field would be.** An H613D
+showing red answers `aa 05 02 ff 00 00 00 ff 00 00`. Reading bytes 6-7 as Kelvin
+gives 255, and any non-zero Kelvin means "white mode" — so a lit red strip
+reports itself as white at 255 K. The repeat must be ignored for `0x02`.
+
+**The wrong dialect is silently accepted.** A device receipts `33 05 0d` with
+`33 05 00` exactly as it receipts a frame it understands, then does nothing.
+Nothing on the wire distinguishes the two, which is why this survived so long:
+the strip stayed the colour it was while Home Assistant showed the colour we had
+asked for.
+
+**How to tell which a device speaks: ask it.** The mode byte in its `aa 05`
+reply is the sub-command it last accepted. That is device-driven and needs no
+per-SKU list — the kind of list that had rotted to describing one of eleven
+models by the time anyone checked.
+
 ## 4. Segments
 
 ### The device reports its segment colours

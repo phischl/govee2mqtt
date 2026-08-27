@@ -331,12 +331,23 @@ impl PacketManager {
                     body[0] != SEGMENT_MODE,
                     "{SEGMENT_MODE:#04x} is the segment mode, not a colour"
                 );
+                // A `0x02` device has no Kelvin field: it repeats the colour
+                // instead. Read literally, an H613D showing red answered
+                // `aa 05 02 ff 00 00 00 ff 00 00` and we took bytes 4-5 as
+                // 255 K — so a lit red strip reported itself as being in white
+                // mode. Anything but zero there means "colour temperature" to
+                // the rest of the code.
+                let kelvin = if body[0] == COLOR_MODE_RGB_ONLY {
+                    0
+                } else {
+                    u16::from_be_bytes([body[4], body[5]])
+                };
                 Ok(GoveeBlePacket::NotifyDeviceColor(NotifyDeviceColor {
                     mode: body[0],
                     r: body[1],
                     g: body[2],
                     b: body[3],
-                    kelvin: OptionalKelvin(u16::from_be_bytes([body[4], body[5]])),
+                    kelvin: OptionalKelvin(kelvin),
                 }))
             },
         ));
@@ -1155,6 +1166,78 @@ pub fn query_device_color() -> Base64HexBytes {
     Base64HexBytes::with_bytes(vec![0xaa, 0x05, 0x01])
 }
 
+/// The sub-command a device's colour frames use.
+///
+/// `0x0d` is what this project has always sent, and what most Govee lights
+/// answer with. Some speak `0x02` instead — an H613D receipts `33 05 0d` with
+/// `33 05 00` exactly like any other frame and then ignores it, which on a wire
+/// that never acknowledges anything is indistinguishable from success. Both
+/// values were captured from the Govee app driving real hardware.
+pub const COLOR_MODE_KELVIN: u8 = 0x0d;
+/// See [`COLOR_MODE_KELVIN`]. A device in this dialect has no notion of Kelvin.
+pub const COLOR_MODE_RGB_ONLY: u8 = 0x02;
+
+/// The colour write, in whichever dialect the device speaks.
+pub fn set_device_color_rgb(mode: u8, r: u8, g: u8, b: u8) -> Vec<u8> {
+    finish(vec![0x33, 0x05, mode, r, g, b])
+}
+
+/// The colour-temperature write, in whichever dialect the device speaks.
+///
+/// A `0x0d` device takes a big-endian Kelvin value. A `0x02` device has no
+/// Kelvin field at all: the app sends `ff ff ff` as the white marker, then
+/// `01`, then the colour that temperature renders as — so we have to render it
+/// ourselves. Measured against the app's own values for this device, the
+/// Tanner-Helland approximation lands within a few counts:
+///
+/// | Slider | The app sent | We produce |
+/// |---|---|---|
+/// | warm | `ff 8d 0b` | `ff 89 0e` |
+/// | middle | `ff ee de` | `ff ef e4` |
+/// | cool | `d9 e1 ff` | `d6 e1 ff` |
+///
+/// Note this contradicts an older note in the protocol document, which found
+/// the app's *companion* RGB on a `0x0d` device did not match Tanner-Helland.
+/// Different device, different field; here it does.
+pub fn set_device_color_temperature(mode: u8, kelvin: u16) -> Vec<u8> {
+    if mode == COLOR_MODE_RGB_ONLY {
+        let (r, g, b) = kelvin_to_rgb(kelvin);
+        finish(vec![0x33, 0x05, mode, 0xff, 0xff, 0xff, 0x01, r, g, b])
+    } else {
+        let [hi, lo] = kelvin.to_be_bytes();
+        finish(vec![0x33, 0x05, mode, 0xff, 0xff, 0xff, hi, lo])
+    }
+}
+
+/// Render a colour temperature as RGB, after Tanner Helland.
+///
+/// Only needed for devices that cannot be told a temperature directly.
+pub fn kelvin_to_rgb(kelvin: u16) -> (u8, u8, u8) {
+    let t = (kelvin.clamp(1000, 40000) as f64) / 100.0;
+
+    let clamp = |v: f64| v.clamp(0.0, 255.0).round() as u8;
+
+    let red = if t <= 66.0 {
+        255.0
+    } else {
+        329.698_727_446 * (t - 60.0).powf(-0.133_204_759_2)
+    };
+    let green = if t <= 66.0 {
+        99.470_802_586 * t.ln() - 161.119_568_166
+    } else {
+        288.122_169_528 * (t - 60.0).powf(-0.075_514_849_2)
+    };
+    let blue = if t >= 66.0 {
+        255.0
+    } else if t <= 19.0 {
+        0.0
+    } else {
+        138.517_731_223 * (t - 10.0).ln() - 305.044_792_730
+    };
+
+    (clamp(red), clamp(green), clamp(blue))
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GoveeBlePacket {
     Generic(HexBytes),
@@ -1696,6 +1779,81 @@ a3 ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5c
     /// `SEGMENT_MASK_AT` where the colour frame keeps it. An earlier probe used
     /// the correct sub-command with the colour frame's mask position and found
     /// nothing, which cost weeks.
+    #[test]
+    fn the_h613d_dialect_matches_the_capture() {
+        // Every frame here was read out of an HCI capture of the Govee app
+        // driving an H613D on 2026-08-27, and verified against the strip.
+        let spaced = |b: Vec<u8>| {
+            b.iter()
+                .map(|v| format!("{v:02X}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let flat = |b: Vec<u8>| b.iter().map(|v| format!("{v:02x}")).collect::<String>();
+
+        assert_eq!(
+            spaced(set_device_color_rgb(COLOR_MODE_RGB_ONLY, 0xFF, 0, 0)),
+            "33 05 02 FF 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 CB",
+            "the app's red"
+        );
+        assert_eq!(
+            spaced(set_device_color_rgb(COLOR_MODE_RGB_ONLY, 0, 0, 0xFF)),
+            "33 05 02 00 00 FF 00 00 00 00 00 00 00 00 00 00 00 00 00 CB",
+            "the app's blue"
+        );
+
+        // The dialect we have always spoken must not have moved.
+        assert_eq!(
+            flat(set_device_color_rgb(COLOR_MODE_KELVIN, 1, 2, 254)),
+            encode_light(&SetDeviceColorRgb { r: 1, g: 2, b: 254 })
+        );
+        assert_eq!(
+            flat(set_device_color_temperature(COLOR_MODE_KELVIN, 6500)),
+            encode_light(&SetDeviceColorTemperature {
+                kelvin: Kelvin::new(6500).unwrap()
+            })
+        );
+
+        // A 0x02 device has no Kelvin field at all: white marker, 0x01, then
+        // the temperature rendered as a colour.
+        let warm = set_device_color_temperature(COLOR_MODE_RGB_ONLY, 2000);
+        assert_eq!(&warm[..7], &[0x33, 0x05, 0x02, 0xFF, 0xFF, 0xFF, 0x01]);
+        let (r, g, b) = (warm[7], warm[8], warm[9]);
+        assert_eq!(r, 0xFF, "the warm end is full red");
+        assert!(
+            (0x80..=0x99).contains(&g),
+            "app sent 0x8d, we sent {g:#04x}"
+        );
+        assert!(b < 0x20, "app sent 0x0b, we sent {b:#04x}");
+    }
+
+    #[test]
+    fn a_repeated_colour_is_not_a_colour_temperature() {
+        // An H613D showing red answers with the colour twice. Read as Kelvin,
+        // the second copy said 255 K and a lit red strip reported itself as
+        // white.
+        let frame = finish(vec![
+            0xAA, 0x05, 0x02, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0x00, 0x00,
+        ]);
+        match decode_notification(GENERIC_LIGHT, &frame) {
+            GoveeBlePacket::NotifyDeviceColor(c) => {
+                assert_eq!((c.r, c.g, c.b), (0xFF, 0, 0));
+                assert_eq!(c.mode, COLOR_MODE_RGB_ONLY);
+                assert_eq!(c.kelvin.get(), None, "0x02 carries no Kelvin");
+            }
+            other => panic!("expected a colour, got {other:?}"),
+        }
+
+        // The 0x0d dialect keeps reading its Kelvin field.
+        let frame = finish(vec![0xAA, 0x05, 0x0D, 0xFF, 0xFF, 0xFF, 0x19, 0x64]);
+        match decode_notification(GENERIC_LIGHT, &frame) {
+            GoveeBlePacket::NotifyDeviceColor(c) => {
+                assert_eq!(c.kelvin.get(), Some(6500))
+            }
+            other => panic!("expected a colour, got {other:?}"),
+        }
+    }
+
     #[test]
     fn segment_brightness_matches_the_app_and_the_hardware() {
         let cases = [

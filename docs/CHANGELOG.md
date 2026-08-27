@@ -145,6 +145,14 @@ segment. Both were fixed by reading what the devices already say.
   device does not really have one colour, and a Bluetooth-only strip does not even pretend —
   it answers the colour query with the segment marker, leaving Home Assistant a colour picker
   with nothing in it. A device that does report a colour keeps it.
+- **Colour works on lights that speak the other dialect.** Some Govee lights take
+  `33 05 02` for colour where most take `33 05 0d`, and an H613D is one of them. It receipted
+  our frames exactly as it receipts one it understands and then ignored them, so Home Assistant
+  showed the colour that had been asked for while the strip stayed as it was. Such a device also
+  has no Kelvin field — its colour temperature travels as a rendered colour — and its reply
+  repeats the colour where Kelvin would be, which we had been reading as "white at 255 K" on a
+  strip that was lit red. Which dialect a device speaks is now read from the device's own reply
+  and remembered, rather than guessed from a model list.
 - **A device that will not name its colour keeps it across a restart too.** The guard below
   stops a colour being overwritten with black, but it can only keep what is in memory — so
   after every restart a Bluetooth-only strip came back with a colour picker showing black,

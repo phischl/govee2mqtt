@@ -53,6 +53,9 @@ pub struct Device {
     /// A segment count carried over from an earlier run. Discovery is otherwise
     /// forgotten on every restart, and the entities flap while it re-converges.
     pub remembered_segment_count: Option<u32>,
+    /// Which colour sub-command this device answered with. See
+    /// [`crate::ble::COLOR_MODE_KELVIN`].
+    pub reported_color_mode: Option<u8>,
     /// How many light strings are chained together, from `aa 0f`.
     ///
     /// Only products that take a second string report this, and it is the only
@@ -955,6 +958,31 @@ impl Device {
 
     pub fn set_remembered_segment_count(&mut self, count: u32) {
         self.remembered_segment_count = Some(count);
+    }
+
+    /// The colour sub-command this device speaks.
+    ///
+    /// Devices differ, and the device is the one that knows: the mode byte in
+    /// its `aa 05` reply is the sub-command it last accepted. Defaulting to
+    /// `0x0d` keeps every device that works today working; the alternative is
+    /// only ever adopted because a device asked for it.
+    ///
+    /// Deliberately **not** a per-SKU list. `iot_api_supported` was one, and it
+    /// had drifted to describing one of eleven models on this account.
+    pub fn color_mode(&self) -> u8 {
+        self.reported_color_mode
+            .unwrap_or(crate::ble::COLOR_MODE_KELVIN)
+    }
+
+    /// Record the colour sub-command a notification arrived with.
+    ///
+    /// Returns whether this is news, so the caller can persist it.
+    pub fn set_reported_color_mode(&mut self, mode: u8) -> bool {
+        if self.reported_color_mode == Some(mode) {
+            return false;
+        }
+        self.reported_color_mode = Some(mode);
+        true
     }
 
     /// Segments Govee's metadata claims. Unreliable in both directions: it

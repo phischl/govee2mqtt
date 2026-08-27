@@ -110,6 +110,18 @@ async fn restore_remembered_segments(state: &StateHandle) {
 /// Deliberately limited to Bluetooth-only lights. Every other device has a
 /// source that reports colour properly, and a restored value carrying a fresh
 /// timestamp would outrank it in `Device::device_state`.
+async fn restore_remembered_color_modes(state: &StateHandle) {
+    for device in state.devices().await {
+        let Some(mode) = crate::cache::recall::<u8>(&format!("colormode/{}", device.id)) else {
+            continue;
+        };
+        let mut device = state.device_mut(&device.sku, &device.id).await;
+        if device.set_reported_color_mode(mode) {
+            log::info!("{device} speaks colour sub-command {mode:#04x}");
+        }
+    }
+}
+
 async fn restore_remembered_colors(state: &StateHandle) {
     for device in state.devices().await {
         if !device.is_ble_only_light() {
@@ -627,6 +639,7 @@ impl ServeCommand {
         // there.
         restore_remembered_segments(&state).await;
         restore_remembered_colors(&state).await;
+        restore_remembered_color_modes(&state).await;
 
         // Set up before the MQTT loop starts: the loop registers routes for the
         // executor's topics only if a scheduler exists, and the retained status

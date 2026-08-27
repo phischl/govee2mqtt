@@ -17,9 +17,9 @@
 
 use crate::ble::{
     decode_notification, query_device_brightness, query_device_color, query_device_power,
-    query_segment_colors, Base64HexBytes, GoveeBlePacket, Kelvin, NotifySegmentColors,
-    SetDeviceBrightness, SetDeviceColorRgb, SetDeviceColorTemperature, SetDevicePower,
-    SetSegmentColorRgb, SetSegmentColorTemperature, GENERIC_LIGHT, SEGMENTS_PER_PAGE,
+    query_segment_colors, Base64HexBytes, GoveeBlePacket, NotifySegmentColors, SetDeviceBrightness,
+    SetDevicePower, SetSegmentColorRgb, SetSegmentColorTemperature, GENERIC_LIGHT,
+    SEGMENTS_PER_PAGE,
 };
 use crate::lan_api::DeviceColor;
 use crate::service::ble_bridge::{
@@ -315,7 +315,7 @@ impl PendingOps {
     /// ignore the whole-strip colour write — an H613D switched on over
     /// Bluetooth and kept the colour it already had — so a colour for them is
     /// sent as a segment command naming every segment instead.
-    fn frames(&self, segments: Option<u32>) -> anyhow::Result<Vec<Vec<u8>>> {
+    fn frames(&self, segments: Option<u32>, color_mode: u8) -> anyhow::Result<Vec<Vec<u8>>> {
         let mut frames = vec![];
 
         if let Some(on) = self.power {
@@ -341,7 +341,7 @@ impl PendingOps {
                 Some(count) if count > 0 => frames.push(encode(
                     &SetSegmentColorRgb::for_segments(0..count, (r, g, b))?,
                 )?),
-                _ => frames.push(encode(&SetDeviceColorRgb { r, g, b })?),
+                _ => frames.push(crate::ble::set_device_color_rgb(color_mode, r, g, b)),
             }
         } else if let Some(kelvin) = self.kelvin {
             // Same shape as colour: a segmented device ignores the whole-device
@@ -352,9 +352,7 @@ impl PendingOps {
                 Some(count) if count > 0 => frames.push(encode(
                     &SetSegmentColorTemperature::for_segments(0..count, kelvin)?,
                 )?),
-                _ => frames.push(encode(&SetDeviceColorTemperature {
-                    kelvin: Kelvin::new(kelvin)?,
-                })?),
+                _ => frames.push(crate::ble::set_device_color_temperature(color_mode, kelvin)),
             }
         }
 
@@ -544,6 +542,10 @@ struct DeviceQueue {
     /// `Some(count)` when this device is addressed as segments; see
     /// `PendingOps::frames`.
     segments: Option<u32>,
+    /// The colour sub-command this device speaks; see `Device::color_mode`.
+    /// `None` only until the first command; `u8::default()` would be `0x00`,
+    /// which is not a dialect at all.
+    color_mode: Option<u8>,
     pending: PendingOps,
     waiters: Vec<Waiter>,
     flush_scheduled: bool,
@@ -630,6 +632,7 @@ impl BleScheduler {
             let queue = devices.entry(device_id.clone()).or_default();
             queue.address = address.to_string();
             queue.segments = device.segment_count();
+            queue.color_mode = Some(device.color_mode());
             for op in ops {
                 queue.pending.merge(op)?;
             }
@@ -681,7 +684,7 @@ impl BleScheduler {
     ) {
         tokio::time::sleep(self.config.coalesce_window).await;
 
-        let (address, segments, pending, waiters) = {
+        let (address, segments, color_mode, pending, waiters) = {
             let mut devices = self.devices.lock().await;
             let Some(queue) = devices.get_mut(&device_id) else {
                 return;
@@ -693,13 +696,22 @@ impl BleScheduler {
             (
                 queue.address.clone(),
                 queue.segments,
+                queue.color_mode,
                 std::mem::take(&mut queue.pending),
                 std::mem::take(&mut queue.waiters),
             )
         };
 
         let result = self
-            .run_session(&state, &device_id, &sku, &address, &pending, segments)
+            .run_session(
+                &state,
+                &device_id,
+                &sku,
+                &address,
+                &pending,
+                segments,
+                color_mode.unwrap_or(crate::ble::COLOR_MODE_KELVIN),
+            )
             .await;
 
         match &result {
@@ -776,8 +788,9 @@ impl BleScheduler {
         address: &str,
         pending: &PendingOps,
         segments: Option<u32>,
+        color_mode: u8,
     ) -> anyhow::Result<()> {
-        let frames = pending.frames(segments)?;
+        let frames = pending.frames(segments, color_mode)?;
         anyhow::ensure!(!frames.is_empty(), "nothing to send");
 
         // Writes only. The read-back is scheduled afterwards, off the caller's
@@ -1022,6 +1035,7 @@ impl BleScheduler {
         // carries can only be read from the whole set, see
         // `Device::set_segment_colors`.
         let mut segment_pages: Vec<NotifySegmentColors> = vec![];
+        let mut learned_color_mode: Option<u8> = None;
 
         for result in results.iter().filter(|result| result.kind == "notify") {
             let Some(encoded) = &result.data else {
@@ -1073,8 +1087,21 @@ impl BleScheduler {
                     // through `aa 01`, which is reported separately. So this
                     // frame carries no information either way.
                     log::debug!("{device_id} reported no colour; keeping what we had");
+                    // Still worth learning from: the mode byte is valid even
+                    // when the colour fields are not.
+                    if device.set_reported_color_mode(color.mode) {
+                        log::info!("{device_id} speaks colour sub-command {:#04x}", color.mode);
+                        learned_color_mode = Some(color.mode);
+                    }
                 }
                 GoveeBlePacket::NotifyDeviceColor(color) => {
+                    // The mode byte is the sub-command this device last
+                    // accepted, which is how we learn which dialect to write
+                    // in. Only a device's own answer changes our belief.
+                    if device.set_reported_color_mode(color.mode) {
+                        log::info!("{device_id} speaks colour sub-command {:#04x}", color.mode);
+                        learned_color_mode = Some(color.mode);
+                    }
                     changed |= device.update_ble_device_status(|status| {
                         status.color = DeviceColor {
                             r: color.r,
@@ -1118,6 +1145,15 @@ impl BleScheduler {
         if changed {
             if let Some(device) = state.device_by_id(device_id).await {
                 device.remember_ble_color();
+            }
+        }
+
+        // The dialect too, and this one matters even more: writing in the wrong
+        // one is silently ignored by the device, so a restart would send a
+        // fortnight of commands into the void before the next poll corrected us.
+        if let Some(mode) = learned_color_mode {
+            if let Err(err) = crate::cache::remember(&format!("colormode/{device_id}"), &mode) {
+                log::warn!("could not remember the colour mode for {device_id}: {err:#}");
             }
         }
 
@@ -1511,7 +1547,7 @@ mod test {
         pending.merge(&DeviceOp::LightPowerOn(true)).unwrap();
         pending.merge(&DeviceOp::SetBrightness(50)).unwrap();
 
-        for frame in pending.frames(None).unwrap() {
+        for frame in pending.frames(None, crate::ble::COLOR_MODE_KELVIN).unwrap() {
             assert_eq!(frame.len(), 20, "a Govee frame is twenty bytes");
             assert_eq!(frame[0], 0x33, "a write frame starts with 0x33");
             assert_eq!(
@@ -1533,7 +1569,7 @@ mod test {
 
     fn frames_hex_for(pending: &PendingOps, segments: Option<u32>) -> Vec<String> {
         pending
-            .frames(segments)
+            .frames(segments, crate::ble::COLOR_MODE_KELVIN)
             .unwrap()
             .into_iter()
             .map(|frame| frame.iter().map(|b| format!("{b:02x}")).collect())
