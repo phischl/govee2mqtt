@@ -8,7 +8,7 @@ use anyhow::Context;
 use reqwest::Method;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{json, Value as JsonValue};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::Duration;
 use thiserror::Error;
 
@@ -297,22 +297,31 @@ impl GoveeApiClient {
     /// This hides them, it does not remove them. `set_scene_by_name` still
     /// resolves both, so an automation that already names one keeps working,
     /// and `govee http-control music` still sets a music mode directly.
+    ///
+    /// The app-authored ones are recognised by the **instance** their
+    /// capability carries, not by their names. An earlier version fetched
+    /// `get_device_diy_scenes` and excluded those names, which missed them
+    /// entirely: Govee also lists them on the device itself, and the separate
+    /// call is one more thing that can quietly return nothing.
     pub async fn list_scene_names(&self, device: &HttpDeviceInfo) -> anyhow::Result<Vec<String>> {
-        let mut result = vec![];
+        // Scene capabilities the Govee app owns. Both are authored there
+        // against one device, and neither is ever named in a status packet,
+        // so Home Assistant can offer them but never show which is active.
+        const APP_AUTHORED_SCENES: &[&str] = &["diyScene", "snapshot"];
 
-        let diy = self.diy_scene_names(device).await;
+        let mut result = vec![];
 
         let caps = self
             .get_scene_caps(device)
             .await
             .context("list_scene_names: get_scene_caps")?;
         for cap in caps {
+            if APP_AUTHORED_SCENES.contains(&cap.instance.as_str()) {
+                continue;
+            }
             match &cap.parameters {
                 Some(DeviceParameters::Enum { options }) => {
                     for opt in options {
-                        if diy.contains(&opt.name) {
-                            continue;
-                        }
                         result.push(opt.name.to_string());
                     }
                 }
@@ -325,33 +334,6 @@ impl GoveeApiClient {
         }
 
         Ok(sort_and_dedup_scenes(result))
-    }
-
-    /// The names of the DIY scenes authored in the Govee app for this device.
-    ///
-    /// A failure here is logged and otherwise ignored: the built-in scenes are
-    /// worth listing even when the DIY list cannot be fetched, and the only
-    /// cost of getting it wrong is a DIY scene showing up after all.
-    async fn diy_scene_names(&self, device: &HttpDeviceInfo) -> HashSet<String> {
-        let mut names = HashSet::new();
-        match self.get_device_diy_scenes(device).await {
-            Ok(caps) => {
-                for cap in caps {
-                    if let Some(DeviceParameters::Enum { options }) = &cap.parameters {
-                        for opt in options {
-                            names.insert(opt.name.to_string());
-                        }
-                    }
-                }
-            }
-            Err(err) => {
-                log::warn!(
-                    "listing DIY scenes for {device}: {err:#}",
-                    device = device.device
-                );
-            }
-        }
-        names
     }
 
     pub async fn set_scene_by_name(
