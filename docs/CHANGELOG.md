@@ -128,6 +128,12 @@ segment. Both were fixed by reading what the devices already say.
 - **Write-only toggles are no longer offered.** `dreamViewToggle` and `gradientToggle` are never
   reported back by the device, so the switch read `unknown` for ever and sprang back after every
   press. Toggles that do report state stay.
+- **Music modes and DIY scenes are no longer offered as effects.** A music mode makes the device
+  listen to its own microphone, so it does nothing in a quiet room; a DIY scene is drawn in the
+  Govee app against one device's segment layout. Neither is ever reported back — Govee names no
+  active scene in any status packet, on any channel — so both could be selected, never
+  confirmed, and were silently forgotten at the next poll. They are hidden, not removed: an
+  automation that already names one keeps working.
 - **Colour temperature works on a segmented device over Bluetooth.** Such a device receipts the
   whole-device frame and ignores it, so it could not be set to white over the radio at all — a
   Bluetooth-only strip had no way to do it. The command turns out to be the segment write with a

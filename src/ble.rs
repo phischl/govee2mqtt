@@ -1700,7 +1700,11 @@ a3 ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5c
     fn segment_brightness_matches_the_app_and_the_hardware() {
         let cases = [
             // The app, segment 5 -> 40%.
-            (vec![5u32], 40u8, "3305150228 20 00000000000000000000000000 29"),
+            (
+                vec![5u32],
+                40u8,
+                "3305150228 20 00000000000000000000000000 29",
+            ),
             // The app, the same segment -> 100%.
             (vec![5], 100, "3305150264 20 00000000000000000000000000 65"),
             // Ours, segment 8 -> 40%: bit 8 needs a second mask byte.
@@ -1740,7 +1744,10 @@ a3 ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5c
         assert_eq!(colour[3], 0x01);
         assert_eq!(bright[3], 0x02);
         assert_eq!(colour[SEGMENT_MASK_AT], 0x01, "colour mask at byte 12");
-        assert_eq!(colour[SEGMENT_BRIGHTNESS_MASK_AT], 0x00, "and not at byte 5");
+        assert_eq!(
+            colour[SEGMENT_BRIGHTNESS_MASK_AT], 0x00,
+            "and not at byte 5"
+        );
         assert_eq!(
             bright[SEGMENT_BRIGHTNESS_MASK_AT], 0x01,
             "brightness mask at byte 5"

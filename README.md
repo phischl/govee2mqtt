@@ -54,8 +54,7 @@ second add-on, so it installs through HACS and not through the Add-on Store.
 
 |Feature|Requires|Notes|
 |-------|--------|-------------|
-|DIY Scenes|API Key|Find in the list of Effects for the light in Home Assistant|
-|Music Modes|API Key|Find in the list of Effects for the light in Home Assistant|
+|Scenes|API Key|Find in the list of Effects for the light in Home Assistant. DIY scenes and music modes are left out on purpose — see below|
 |Tap-to-Run / One Click Scene|IoT|Find in the overall list of Scenes in Home Assistant, as well as under the `Govee to MQTT` device|
 |Live Device Status Updates|LAN and/or IoT|Devices typically report most changes within a couple of seconds.|
 |Segment Color|API Key|Find the `Segment 00X` light entities associated with your main light device in Home Assistant. Setting a colour needs the API Key; *reading back* which segment is which colour needs `IoT`, since the Platform API reports segment state as empty|
@@ -70,8 +69,8 @@ second add-on, so it installs through HACS and not through the Add-on Store.
 
 ### What this fork deliberately does not create
 
-Some of what Govee offers is not worth an entity, and leaving it out is a decision rather than an
-oversight:
+Some of what Govee offers is not worth an entity or an effect, and leaving it out is a decision
+rather than an oversight:
 
 * **Groups made in the Govee app.** The official API returns them alongside real devices, with a
   numeric id where a light has a MAC and a SKU ending in `Group`. Nothing ever reports state for
@@ -84,8 +83,19 @@ oversight:
   back after every press. Both are set from the Govee app. Toggles that *do* report — a device's
   `powerSwitch`, and the `light1`…`light3` of a lamp built as several heads — are useful and stay.
 
-Existing entities of either kind do not disappear on their own: their MQTT discovery configs are
-retained by the broker, so after upgrading they linger as unavailable until deleted under
+* **Music modes and DIY scenes.** Both were offered as effects on every light. A music mode
+  makes the device listen to its own microphone, so it does nothing in a quiet room and nothing
+  an automation can rely on; a DIY scene is drawn in the Govee app against one device's segment
+  layout, and is edited and deleted there. What they share is that Govee reports no active scene
+  in any status packet on any channel, so both could be picked, never confirmed, and were
+  silently forgotten at the next poll.
+
+  They are hidden, not removed. An automation that already names one keeps working, and
+  `govee http-control music` still sets a music mode directly.
+
+The two effects above simply stop being offered after an upgrade. The **entities**, though, do
+not disappear on their own: their MQTT discovery configs are retained by the broker, so a group
+or a toggle from an earlier version lingers as unavailable until deleted under
 Settings → Devices & Services → MQTT.
 
 See [docs/CHANGELOG.md](docs/CHANGELOG.md) for what this fork changes, and what it does not

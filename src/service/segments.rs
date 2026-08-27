@@ -248,8 +248,7 @@ impl SegmentBatcher {
     /// costs one message rather than two.
     fn encode(pending: &Pending) -> anyhow::Result<Vec<Vec<u8>>> {
         let colours = pending.rgb.iter().map(|((r, g, b), segments)| {
-            let command =
-                SetSegmentColorRgb::for_segments(segments.iter().copied(), (*r, *g, *b))?;
+            let command = SetSegmentColorRgb::for_segments(segments.iter().copied(), (*r, *g, *b))?;
             crate::ble::encode_for_generic_light(&command)
         });
         let brightnesses = pending.brightness.iter().map(|(percent, segments)| {
@@ -385,7 +384,10 @@ mod test {
         assert_eq!(frames.len(), 2, "one colour frame and one brightness frame");
 
         let colour = frames.iter().find(|f| f[3] == 0x01).expect("colour frame");
-        let bright = frames.iter().find(|f| f[3] == 0x02).expect("brightness frame");
+        let bright = frames
+            .iter()
+            .find(|f| f[3] == 0x02)
+            .expect("brightness frame");
 
         // The colour names segment 0 only, with the mask at byte 12.
         assert_eq!((colour[4], colour[5], colour[6]), (255, 0, 0));

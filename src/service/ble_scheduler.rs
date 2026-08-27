@@ -1032,7 +1032,10 @@ impl BleScheduler {
             // half a diagnosis.
             log::debug!(
                 "BLE notification from {device_id}: {} -> {packet:?}",
-                bytes.iter().map(|b| format!("{b:02X} ")).collect::<String>()
+                bytes
+                    .iter()
+                    .map(|b| format!("{b:02X} "))
+                    .collect::<String>()
             );
             let mut device = state.device_mut(sku, device_id).await;
             match packet {
@@ -1426,7 +1429,12 @@ mod test {
 
         // And it is the query frame's own header, not a second source of
         // truth that could drift from it.
-        for query in [Query::Power, Query::Brightness, Query::Color, Query::Segments(2)] {
+        for query in [
+            Query::Power,
+            Query::Brightness,
+            Query::Color,
+            Query::Segments(2),
+        ] {
             let frame = query.frame().unwrap();
             let prefix = query.expect_prefix();
             assert_eq!(&frame[..prefix.len()], &prefix[..], "{query:?}");
@@ -1447,11 +1455,7 @@ mod test {
         pending.merge(&DeviceOp::LightPowerOn(true)).unwrap();
         pending.merge(&DeviceOp::SetBrightness(60)).unwrap();
         pending
-            .merge(&DeviceOp::SetColorRgb {
-                r: 0,
-                g: 255,
-                b: 0,
-            })
+            .merge(&DeviceOp::SetColorRgb { r: 0, g: 255, b: 0 })
             .unwrap();
         assert!(pending.apply_optimistically(&mut device));
 

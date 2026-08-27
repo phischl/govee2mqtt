@@ -8,7 +8,7 @@ use anyhow::Context;
 use reqwest::Method;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{json, Value as JsonValue};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use thiserror::Error;
 
@@ -280,8 +280,27 @@ impl GoveeApiClient {
         Ok(result)
     }
 
+    /// The scene names offered to Home Assistant, the web UI and the CLI.
+    ///
+    /// Two kinds are deliberately left out. **Music modes** make the device
+    /// react to its own microphone, so they do nothing at all in a quiet room
+    /// and cannot be driven from an automation in any useful way. **DIY
+    /// scenes** are authored in the Govee app against one device's segment
+    /// layout, and are edited and deleted there.
+    ///
+    /// What they have in common is that neither is ever reported back: Govee
+    /// sends no active scene in any status packet, over any channel. So both
+    /// arrived in Home Assistant as effects that could be selected, never
+    /// confirmed, and silently dropped again at the next poll -- the same
+    /// trade that removed `dreamViewToggle` and `gradientToggle`.
+    ///
+    /// This hides them, it does not remove them. `set_scene_by_name` still
+    /// resolves both, so an automation that already names one keeps working,
+    /// and `govee http-control music` still sets a music mode directly.
     pub async fn list_scene_names(&self, device: &HttpDeviceInfo) -> anyhow::Result<Vec<String>> {
         let mut result = vec![];
+
+        let diy = self.diy_scene_names(device).await;
 
         let caps = self
             .get_scene_caps(device)
@@ -291,25 +310,13 @@ impl GoveeApiClient {
             match &cap.parameters {
                 Some(DeviceParameters::Enum { options }) => {
                     for opt in options {
+                        if diy.contains(&opt.name) {
+                            continue;
+                        }
                         result.push(opt.name.to_string());
                     }
                 }
                 _ => anyhow::bail!("list_scene_names: unexpected type {cap:#?}"),
-            }
-        }
-
-        // Add in music modes
-        if let Some(cap) = device.capability_by_instance("musicMode") {
-            if let Some(DeviceParameters::Struct { fields }) = &cap.parameters {
-                for f in fields {
-                    if f.field_name == "musicMode" {
-                        if let DeviceParameters::Enum { options } = &f.field_type {
-                            for opt in options {
-                                result.push(format!("Music: {}", opt.name));
-                            }
-                        }
-                    }
-                }
             }
         }
 
@@ -318,6 +325,33 @@ impl GoveeApiClient {
         }
 
         Ok(sort_and_dedup_scenes(result))
+    }
+
+    /// The names of the DIY scenes authored in the Govee app for this device.
+    ///
+    /// A failure here is logged and otherwise ignored: the built-in scenes are
+    /// worth listing even when the DIY list cannot be fetched, and the only
+    /// cost of getting it wrong is a DIY scene showing up after all.
+    async fn diy_scene_names(&self, device: &HttpDeviceInfo) -> HashSet<String> {
+        let mut names = HashSet::new();
+        match self.get_device_diy_scenes(device).await {
+            Ok(caps) => {
+                for cap in caps {
+                    if let Some(DeviceParameters::Enum { options }) = &cap.parameters {
+                        for opt in options {
+                            names.insert(opt.name.to_string());
+                        }
+                    }
+                }
+            }
+            Err(err) => {
+                log::warn!(
+                    "listing DIY scenes for {device}: {err:#}",
+                    device = device.device
+                );
+            }
+        }
+        names
     }
 
     pub async fn set_scene_by_name(
