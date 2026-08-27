@@ -691,6 +691,23 @@ pub struct HttpDeviceInfo {
 }
 
 impl HttpDeviceInfo {
+    /// Whether this "device" is really a group made in the Govee app.
+    ///
+    /// The official API returns those alongside real devices, with a numeric id
+    /// in place of a MAC and a SKU naming the group kind. Nothing ever reports
+    /// state for one, so it reaches Home Assistant as a switch that does
+    /// nothing and a diagnostic sensor stuck on "Unknown" — while its members
+    /// are already there as devices in their own right.
+    ///
+    /// Matched on the SKU prefix rather than the exact string, because Govee
+    /// has more than one group kind and the shared part is what identifies
+    /// them. Not matched on `type: NONE`, which a real device can also carry:
+    /// a Bluetooth-only light the API knows nothing else about has it too, and
+    /// those we want.
+    pub fn is_group(&self) -> bool {
+        self.sku.ends_with("Group")
+    }
+
     pub fn capability_by_instance(&self, instance: &str) -> Option<&DeviceCapability> {
         self.capabilities
             .iter()
@@ -1116,6 +1133,41 @@ impl GoveeApiClient {
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
+    /// A group made in the Govee app is not a device.
+    ///
+    /// The official API returns them alongside real ones — an id of `4981418`
+    /// and a `SameModeGroup` SKU where a light would carry a MAC — and nothing
+    /// ever reports state for one. Left in, each arrives in Home Assistant as a
+    /// switch that does nothing beside a diagnostic sensor stuck on "Unknown".
+    #[test]
+    fn a_govee_app_group_is_not_a_device() {
+        let group = |sku: &str| HttpDeviceInfo {
+            sku: sku.to_string(),
+            device: "4981418".to_string(),
+            device_name: "Flur Downlight".to_string(),
+            device_type: DeviceType::Other("NONE".to_string()),
+            capabilities: vec![],
+        };
+        assert!(group("SameModeGroup").is_group());
+        // Matched on the suffix: Govee has more than one kind and the shared
+        // part is what names them.
+        assert!(group("DifferentModeGroup").is_group());
+
+        // A real device is not, even one the API can say nothing else about.
+        // A Bluetooth-only light carries `type: NONE` too, so that field on its
+        // own would throw the wrong things away.
+        let light = HttpDeviceInfo {
+            sku: "H6116".to_string(),
+            device: "7E:16:A4:C1:38:14:E6:5A".to_string(),
+            device_name: "Gartenhaus".to_string(),
+            device_type: DeviceType::Other("NONE".to_string()),
+            capabilities: vec![],
+        };
+        assert!(!light.is_group());
+    }
+
     use super::*;
 
     const SCENE_LIST: &str = include_str!("../test-data/scenes.json");

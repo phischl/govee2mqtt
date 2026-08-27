@@ -177,6 +177,23 @@ pub async fn enumerate_entities_for_device(
         for cap in &info.capabilities {
             match &cap.kind {
                 DeviceCapabilityKind::Toggle | DeviceCapabilityKind::OnOff => {
+                    // Some toggles are write-only: Govee accepts them and never
+                    // reports their state, so Home Assistant shows a switch
+                    // that reads "unknown" for ever and springs back after
+                    // every press. `dreamViewToggle` syncs a strip to a screen
+                    // and `gradientToggle` fades between segments; both are set
+                    // from the Govee app, and neither is worth a control that
+                    // cannot say what it did.
+                    //
+                    // Named individually rather than inferred. A capability
+                    // instance means the same thing on every device, so this
+                    // does not rot the way a per-SKU list does — and the ones
+                    // that *do* report state, `powerSwitch` and an H60B2's
+                    // `light1`..`light3`, are useful and stay.
+                    const WRITE_ONLY_TOGGLES: &[&str] = &["dreamViewToggle", "gradientToggle"];
+                    if WRITE_ONLY_TOGGLES.contains(&cap.instance.as_str()) {
+                        continue;
+                    }
                     entities.add(CapabilitySwitch::new(d, state, cap).await?);
                 }
                 DeviceCapabilityKind::ColorSetting

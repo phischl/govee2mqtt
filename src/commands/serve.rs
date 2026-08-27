@@ -343,6 +343,21 @@ async fn enumerate_devices_via_platform_api(
 
     log::info!("Querying platform API for device list");
     for info in client.get_devices().await? {
+        // Groups made in the Govee app come back through the official API as
+        // devices of their own, with a `SameModeGroup` SKU, a numeric id and a
+        // single `powerSwitch` capability. Nothing ever reports state for one,
+        // so they arrive in Home Assistant as a control that does nothing and a
+        // diagnostic sensor stuck on "Unknown" — and the members are already
+        // there as real devices. Grouping belongs to Home Assistant anyway,
+        // where it can span more than one vendor.
+        if info.is_group() {
+            log::debug!(
+                "ignoring {} ({}), which is a group in the Govee app rather than a device",
+                info.device_name,
+                info.sku
+            );
+            continue;
+        }
         let mut device = state.device_mut(&info.sku, &info.device).await;
         device.set_http_device_info(info);
     }

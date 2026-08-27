@@ -68,6 +68,26 @@ second add-on, so it installs through HACS and not through the Add-on Store.
 * `LAN` means that you have enabled the [Govee LAN API](https://app-h5.govee.com/user-manual/wlan-guide)
   on supported devices and that the LAN API protocol is functional on your network
 
+### What this fork deliberately does not create
+
+Some of what Govee offers is not worth an entity, and leaving it out is a decision rather than an
+oversight:
+
+* **Groups made in the Govee app.** The official API returns them alongside real devices, with a
+  numeric id where a light has a MAC and a SKU ending in `Group`. Nothing ever reports state for
+  one, so each arrived as a switch that did nothing beside a diagnostic sensor stuck on
+  `Unknown` — while its members were already present as devices. Grouping belongs to Home
+  Assistant, where it can span more than one vendor.
+
+* **Write-only toggles.** `dreamViewToggle` and `gradientToggle` are accepted by the device and
+  never reported back, so Home Assistant showed a switch that read `unknown` for ever and sprang
+  back after every press. Both are set from the Govee app. Toggles that *do* report — a device's
+  `powerSwitch`, and the `light1`…`light3` of a lamp built as several heads — are useful and stay.
+
+Existing entities of either kind do not disappear on their own: their MQTT discovery configs are
+retained by the broker, so after upgrading they linger as unavailable until deleted under
+Settings → Devices & Services → MQTT.
+
 See [docs/CHANGELOG.md](docs/CHANGELOG.md) for what this fork changes, and what it does not
 yet do.
 

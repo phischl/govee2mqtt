@@ -123,6 +123,11 @@ segment. Both were fixed by reading what the devices already say.
 
 ## Robustness
 
+- **Govee app groups are no longer offered as devices.** The official API returns them alongside
+  real ones, and each arrived as a switch that did nothing beside a sensor stuck on `Unknown`.
+- **Write-only toggles are no longer offered.** `dreamViewToggle` and `gradientToggle` are never
+  reported back by the device, so the switch read `unknown` for ever and sprang back after every
+  press. Toggles that do report state stay.
 - **Colour temperature works on a segmented device over Bluetooth.** Such a device receipts the
   whole-device frame and ignores it, so it could not be set to white over the radio at all — a
   Bluetooth-only strip had no way to do it. The command turns out to be the segment write with a
