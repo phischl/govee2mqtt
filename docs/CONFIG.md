@@ -163,6 +163,13 @@ Note that the diagnostic "Status" sensor calls a device missing once its state
 is older than the **longest** configured interval plus thirty seconds, so
 raising an interval will not make healthy devices report themselves as gone.
 
+## Everything else
+
+|CLI|ENV|AddOn|Purpose|
+|---|---|-----|-------|
+|`--temperature-scale`|`GOVEE_TEMPERATURE_SCALE=C`|`temperature_scale`|`C` for Celsius or `F` for Fahrenheit, for the temperature values reported to Home Assistant. Defaults to `C`.|
+|n/a|`RUST_LOG=govee=info`|`debug_level`|How much the add-on logs, as a Rust log filter. `govee=debug` is the usual first step; `govee=trace` logs sensitive values including MQTT topics and tokens, so redact before sharing. Individual modules can be raised on their own, which is usually what you want: `govee=info,govee::service::ble_scheduler=debug` logs every Bluetooth frame and nothing else.|
+
 ## MQTT Configuration
 
 In order to make your devices appear in Home Assistant, you will need to have configured Home Assistant with an MQTT broker.

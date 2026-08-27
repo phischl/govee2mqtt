@@ -98,8 +98,8 @@ not disappear on their own: their MQTT discovery configs are retained by the bro
 or a toggle from an earlier version lingers as unavailable until deleted under
 Settings → Devices & Services → MQTT.
 
-See [docs/CHANGELOG.md](docs/CHANGELOG.md) for what this fork changes, and what it does not
-yet do.
+See [docs/CHANGELOG.md](docs/CHANGELOG.md) for what this fork changes, and
+[docs/ROADMAP.md](docs/ROADMAP.md) for what is still open.
 
 ## Usage
 

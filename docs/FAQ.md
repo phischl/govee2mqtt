@@ -1,16 +1,17 @@
 # Frequently asked Questions
 
-## Why can't I turn off a Segment?
+## Can I turn off a single Segment?
 
-The Govee API for segments can only specify brightness and color, rather than
-power state for the segment.
+Yes, in this fork. Govee's API has no power state for a segment — only colour
+and brightness — so upstream's segment power control does nothing at all.
 
-However, Home Assistant's Light entity assumes that there is a power state
-control for all lights, so when the entity is made available to Home Assistant
-it shows up with a power control.
+Brightness 0 is the obvious substitute and the wrong one: some devices have no
+0, and on those that do it powers the *whole device* up, so switching one area
+off would flick everything back on. Setting the segment to black has neither
+problem, and that is what switching a segment off does here.
 
-Consequently, the power control for a segment does nothing and cannot be
-removed from the Home Assistant UI for the light entity.
+The segment's own brightness control still cannot switch it off, for the reason
+above.
 
 ## Why is my control over a Segment limited?
 
