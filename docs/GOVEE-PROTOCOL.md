@@ -70,6 +70,13 @@ Notes that cost time to learn:
 - The official app appends an RGB companion value to CT frames (6500 K → `ff f9 fb`). It is
   optional, and its values do not follow any colour-temperature approximation we could
   reproduce, so we omit it.
+- **A segmented device ignores `33 05 0d` in both its forms.** Measured on an H6054 on
+  2026-08-27: sent RGB, and sent `33 05 0d ff ff ff 19 64` for 6500 K, both are receipted and
+  neither changes anything — the segments keep their colours and no colour temperature appears in
+  the status. Such a device takes `33 05 15` and nothing else in this family, which is why
+  whole-device colour is sent to it as a mask over every segment. **There is no segment
+  equivalent for colour temperature**, so a segmented device cannot be set to white over the
+  radio at all; that still goes through the cloud.
 - **Not every device reports its colour.** An H613D answers `aa 05 01` with
   `aa 05 0d 00 00 00 …` — the mode byte and nothing else — however it is actually lit. Power and
   brightness it reports honestly. Read literally that is "black", and a reader that believes it
