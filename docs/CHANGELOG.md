@@ -145,6 +145,12 @@ segment. Both were fixed by reading what the devices already say.
   device does not really have one colour, and a Bluetooth-only strip does not even pretend —
   it answers the colour query with the segment marker, leaving Home Assistant a colour picker
   with nothing in it. A device that does report a colour keeps it.
+- **A device that will not name its colour keeps it across a restart too.** The guard below
+  stops a colour being overwritten with black, but it can only keep what is in memory — so
+  after every restart a Bluetooth-only strip came back with a colour picker showing black,
+  on a light that had been happily lit all along. The colour is now remembered in the same
+  cache as the segment counts and put back at startup, for Bluetooth-only lights alone: every
+  other device has a source that reports colour properly.
 - **A device that will not name its colour keeps the one it was given.** Some answer the colour
   query with the mode byte and nothing else, however they are lit. Read literally that is black,
   and it overwrote the colour the command had just set — leaving Home Assistant with a colour

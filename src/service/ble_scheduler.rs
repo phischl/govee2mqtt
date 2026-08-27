@@ -723,7 +723,15 @@ impl BleScheduler {
         if result.is_ok() {
             let changed = {
                 let mut device = state.device_mut(&sku, &device_id).await;
-                pending.apply_optimistically(&mut device)
+                let changed = pending.apply_optimistically(&mut device);
+                if changed {
+                    // The read-back cannot do this for us: a device that never
+                    // names its colour answers the verification query with
+                    // nothing, so the colour we just set is the only record
+                    // there will ever be of it.
+                    device.remember_ble_color();
+                }
+                changed
             };
             // The guard has to be out of scope first: notifying Home Assistant
             // re-reads the device and would deadlock against it.
@@ -1104,6 +1112,15 @@ impl BleScheduler {
         // just told us it has segments needs entities for them, and for a
         // Bluetooth-only device this is the only place that can ever be
         // learned — the Platform API does not describe such a device at all.
+        // The colour is remembered for the same reason a segment count is: a
+        // device that never names its own would otherwise come back black
+        // after a restart.
+        if changed {
+            if let Some(device) = state.device_by_id(device_id).await {
+                device.remember_ble_color();
+            }
+        }
+
         if segments_discovered {
             if let Some(count) = state
                 .device_by_id(device_id)

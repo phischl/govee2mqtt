@@ -349,6 +349,54 @@ impl Device {
         changed
     }
 
+    /// Persist a colour learned over Bluetooth, so it survives a restart.
+    ///
+    /// Some devices never name a colour of their own. An H613D answers the
+    /// colour query with the mode byte and nothing else however it is lit, so
+    /// the only colour we will ever have for one is the colour we set — and
+    /// that lived in memory alone. After a restart Home Assistant offered a
+    /// colour picker stuck on black until somebody set a colour by hand, on a
+    /// device that had been happily showing one all along.
+    ///
+    /// Black is never remembered: it is what "no colour" looks like on this
+    /// hardware, not a measurement.
+    ///
+    /// Called explicitly by the scheduler rather than from
+    /// `update_ble_device_status`, which is a pure merge of what a
+    /// notification said. Hiding a cache write inside it put file I/O — and
+    /// the panic an unwritable cache raises — behind every state update.
+    pub fn remember_ble_color(&self) {
+        let Some(status) = &self.ble_device_status else {
+            return;
+        };
+        let color = status.color;
+        if color.r == 0 && color.g == 0 && color.b == 0 {
+            return;
+        }
+        if let Err(err) = crate::cache::remember(
+            &format!("color/{}", self.id),
+            &(color.r, color.g, color.b, status.color_temperature_kelvin),
+        ) {
+            log::warn!("remembering the colour of {self}: {err:#}");
+        }
+    }
+
+    /// Put back the colour this device had when we last spoke to it.
+    ///
+    /// Returns whether anything was restored. Only sensible for a device that
+    /// has no other source of truth — see `remember_ble_color`.
+    pub fn restore_remembered_ble_color(&mut self) -> bool {
+        let Some((r, g, b, kelvin)) =
+            crate::cache::recall::<(u8, u8, u8, u32)>(&format!("color/{}", self.id))
+        else {
+            return false;
+        };
+        self.update_ble_device_status(|status| {
+            status.color = DeviceColor { r, g, b };
+            status.color_temperature_kelvin = kelvin;
+        })
+    }
+
     pub fn set_lan_device_status(&mut self, status: LanDeviceStatus) -> bool {
         let changed = self
             .lan_device_status

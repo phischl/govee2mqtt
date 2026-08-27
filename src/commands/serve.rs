@@ -105,6 +105,23 @@ async fn restore_remembered_segments(state: &StateHandle) {
     }
 }
 
+/// Restore the colour of devices that cannot tell us their own.
+///
+/// Deliberately limited to Bluetooth-only lights. Every other device has a
+/// source that reports colour properly, and a restored value carrying a fresh
+/// timestamp would outrank it in `Device::device_state`.
+async fn restore_remembered_colors(state: &StateHandle) {
+    for device in state.devices().await {
+        if !device.is_ble_only_light() {
+            continue;
+        }
+        let mut device = state.device_mut(&device.sku, &device.id).await;
+        if device.restore_remembered_ble_color() {
+            log::info!("{device} kept the colour it had when we last spoke to it");
+        }
+    }
+}
+
 /// Read a Bluetooth-only device's state, if it is due and reachable.
 async fn poll_via_ble(
     state: &StateHandle,
@@ -609,6 +626,7 @@ impl ServeCommand {
         // learned over AWS IoT just as well, and an H6054's only comes from
         // there.
         restore_remembered_segments(&state).await;
+        restore_remembered_colors(&state).await;
 
         // Set up before the MQTT loop starts: the loop registers routes for the
         // executor's topics only if a scheduler exists, and the retained status
