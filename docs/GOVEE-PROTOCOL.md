@@ -333,6 +333,34 @@ extra slots accept writes and hold the value while driving nothing. `AA 0F <n>` 
 that device and is the best candidate for the count of connected strings, on one observation of
 one value — untested, because it needs a second string.
 
+## 4a. Some devices encrypt their Bluetooth traffic
+
+Measured 2026-08-27 from HCI captures of the Govee app across five devices on one account. Two
+classes, and the split is per model:
+
+| Model | GATT traffic |
+|---|---|
+| H6072, H6054 | plain frames — `33 09 …`, `AA 06 "2.04.10"`, everything in this document |
+| H60B2, H7093 | twenty-byte payloads with no `33`/`aa` header and no valid checksum |
+
+The encrypted ones are encrypted **from the very first write**, with no plaintext handshake in
+front of it, so there is nothing in the capture to derive a key from. It has to come from
+somewhere else — the account, or the device by some means we have not seen.
+
+Govee's account metadata carries a **`supportEnc`** flag, which is almost certainly this. Two
+other observations line up with it: an H7020 once put a 27-character non-base64 string into
+`op.command` over AWS IoT, and it appeared the same day the flag did.
+
+**The cloud path is unaffected.** These same devices take plain frames over `ptReal` — an H7093's
+segments were set that way, and an H6054's colour temperature came back correctly. So encryption
+is a property of the radio link, not of the protocol.
+
+**What it costs us.** A device that encrypts cannot be driven over Bluetooth at all, and an
+attempt would fail silently: it accepts the write and ignores it, exactly as a segmented device
+does with `33 05 0d`. Both encrypted devices here are cloud-capable and both are out of proxy
+range anyway, so nothing has bitten yet — but a Bluetooth-only device of this kind would be
+unreachable, and `supportEnc` is how to know in advance rather than by watching commands vanish.
+
 ## 5. Scenes
 
 `src/ble.rs` implements `SetSceneCode` as the `0xa3` chunked multi-frame encoding, from

@@ -174,6 +174,10 @@ segment. Both were fixed by reading what the devices already say.
 
 ## Known limits
 
+- Some Govee models encrypt their Bluetooth traffic, and those cannot be driven over the radio at
+  all. Both such devices here are reachable through the cloud instead, so nothing is lost today,
+  but a Bluetooth-only one would be unreachable. Govee's metadata flags it as `supportEnc`, which
+  the startup log now reports.
 - Base image signatures are not verified during the add-on build. The bundled cosign is too old
   for what sigstore now requires, and bumping the builder is not possible — the monolithic
   action was removed. Migrating to the composable builder actions would restore it.

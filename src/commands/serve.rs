@@ -522,8 +522,16 @@ impl ServeCommand {
                 let room = &undoc.room_name;
                 let supports_iot = undoc.entry.device_ext.device_settings.topic.is_some();
                 let ble_only = undoc.entry.device_ext.device_settings.wifi_name.is_none();
+                // Whether Govee says this device encrypts its Bluetooth
+                // traffic. Measured 2026-08-27: an H60B2 and an H7093 encrypt
+                // theirs from the first write, with no plaintext handshake in
+                // front, while an H6072 and an H6054 speak plain frames. A
+                // device we cannot speak to over the radio should not be
+                // offered the radio, and this flag is how to tell in advance.
+                let encrypted = undoc.entry.device_ext.device_settings.support_enc;
                 log::info!(
-                    "  Undoc: room={room:?} supports_iot={supports_iot} ble_only={ble_only}"
+                    "  Undoc: room={room:?} supports_iot={supports_iot} ble_only={ble_only} \
+                     support_enc={encrypted:?}"
                 );
                 log::trace!("{undoc:#?}");
             }
