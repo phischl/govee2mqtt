@@ -115,6 +115,11 @@ if a device ever needs it.
 
 ## 4. Housekeeping
 
+- **Segment brightness has no optimistic value.** The colour a segment is commanded to show is
+  now written into the device's picture straight away, so the picker no longer flickers. The
+  brightness slider still can, and deliberately so: the per-segment brightness byte a device
+  reports is on a scale nobody has identified, so a percentage from a command cannot honestly be
+  written into the same field. Identifying that scale would close it.
 - **Segment batching never fires.** `service::segments` has a 150 ms coalescing window
   that cannot coalesce, because `mqtt_light_segment_command` takes the per-device
   semaphore one line before reaching it. Each segment therefore costs its own message

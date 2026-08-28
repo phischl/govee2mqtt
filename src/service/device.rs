@@ -301,6 +301,48 @@ impl Device {
         self.segment_colors.get(&segment).copied()
     }
 
+    /// Record the colour a segment was just commanded to show.
+    ///
+    /// Segment entities are optimistic, but the optimism lived only in Home
+    /// Assistant: the moment anything republished this device's state, the
+    /// segment topic carried the colour the device last *reported*, which is
+    /// still the old one until a poll brings a fresh `aa a5` page. Home
+    /// Assistant showed the new colour, snapped back to the previous one, and
+    /// then a few seconds later moved to the new one again.
+    ///
+    /// The brightness byte is preserved: this says nothing about brightness,
+    /// and inventing one would be worse than keeping the last measurement.
+    ///
+    /// Returns whether anything changed.
+    pub fn set_commanded_segment_color(&mut self, segment: u32, r: u8, g: u8, b: u8) -> bool {
+        match self.segment_colors.get_mut(&segment) {
+            Some(entry) => {
+                if (entry.r, entry.g, entry.b) == (r, g, b) {
+                    return false;
+                }
+                entry.r = r;
+                entry.g = g;
+                entry.b = b;
+            }
+            // A segment we have never heard about is news in its own right, and
+            // `or_insert` would have hidden that: the freshly inserted value
+            // compares equal to what was just asked for, so the change reads as
+            // no change and nothing is published.
+            None => {
+                self.segment_colors.insert(
+                    segment,
+                    SegmentColor {
+                        brightness: 0,
+                        r,
+                        g,
+                        b,
+                    },
+                );
+            }
+        }
+        true
+    }
+
     pub fn set_nightlight_state(&mut self, params: NotifyHumidifierNightlightParams) {
         self.nightlight_state.replace(params);
     }
@@ -1610,6 +1652,40 @@ mod test {
         assert_eq!(device.ble_address(), None);
         assert!(!device.is_ble_only_light());
         assert!(!device.is_controllable());
+    }
+
+    #[test]
+    fn a_commanded_segment_colour_shows_before_the_device_reports() {
+        let mut device = Device::new("H7093", "AA:BB:CC:DD:EE:FF:00:09");
+
+        // What the device last told us: segment 0 is red at 50 %.
+        device.segment_colors.insert(
+            0,
+            SegmentColor {
+                brightness: 50,
+                r: 255,
+                g: 0,
+                b: 0,
+            },
+        );
+
+        assert!(device.set_commanded_segment_color(0, 0, 0, 255));
+        let color = device.segment_color(0).expect("segment 0");
+        assert_eq!((color.r, color.g, color.b), (0, 0, 255));
+        assert_eq!(
+            color.brightness, 50,
+            "a colour command says nothing about brightness"
+        );
+
+        // Setting the same colour again is not news, so it publishes nothing.
+        assert!(!device.set_commanded_segment_color(0, 0, 0, 255));
+
+        // A segment we have never heard about still gets a colour.
+        assert!(device.set_commanded_segment_color(7, 1, 2, 3));
+        assert_eq!(
+            device.segment_color(7).map(|c| (c.r, c.g, c.b)),
+            Some((1, 2, 3))
+        );
     }
 
     #[test]

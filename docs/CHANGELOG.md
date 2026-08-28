@@ -145,6 +145,13 @@ segment. Both were fixed by reading what the devices already say.
   device does not really have one colour, and a Bluetooth-only strip does not even pretend —
   it answers the colour query with the segment marker, leaving Home Assistant a colour picker
   with nothing in it. A device that does report a colour keeps it.
+- **A segment's colour picker no longer flickers back to the old colour.** Choosing a colour
+  changed the light immediately, then Home Assistant snapped back to the previous colour and a
+  few seconds later moved to the new one. The segment entities are optimistic, but the optimism
+  lived only in Home Assistant: anything that republished the device's state carried the colour
+  the device last *reported*, which stays the old one until the next poll brings a fresh page.
+  The commanded colour is now written into the device's own picture, and the device's report
+  still corrects it.
 - **Colour works on lights that speak the other dialect.** Some Govee lights take
   `33 05 02` for colour where most take `33 05 0d`, and an H613D is one of them. It receipted
   our frames exactly as it receipts one it understands and then ignored them, so Home Assistant

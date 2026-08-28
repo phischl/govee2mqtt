@@ -126,8 +126,47 @@ impl SegmentBatcher {
             .await
             .map_err(|err| err.to_string());
 
+        if outcome.is_ok() {
+            Self::remember_what_we_asked_for(&state, &device_id, &pending).await;
+        }
+
         for waiter in pending.waiters {
             let _ = waiter.send(outcome.clone());
+        }
+    }
+
+    /// Write the commanded colours into the device's own picture.
+    ///
+    /// Without this the segment topic keeps carrying the colour the device last
+    /// *reported* until a poll brings a fresh `aa a5` page — so Home Assistant
+    /// showed the new colour, snapped back to the old one as soon as anything
+    /// republished the device, and moved to the new one seconds later. The
+    /// device's own report still corrects this when it arrives.
+    ///
+    /// Brightness is deliberately not recorded: the byte a device reports per
+    /// segment is on a scale we have not identified, so a percentage from a
+    /// command cannot be written into the same field.
+    async fn remember_what_we_asked_for(state: &StateHandle, device_id: &str, pending: &Pending) {
+        let Some(device) = state.device_by_id(device_id).await else {
+            return;
+        };
+
+        let changed = {
+            let mut device = state.device_mut(&device.sku, &device.id).await;
+            let mut changed = false;
+            for ((r, g, b), segments) in &pending.rgb {
+                for segment in segments {
+                    changed |= device.set_commanded_segment_color(*segment, *r, *g, *b);
+                }
+            }
+            changed
+        };
+
+        // Outside the guard: notifying re-reads the device and would deadlock.
+        if changed {
+            if let Err(err) = state.notify_of_state_change(device_id).await {
+                log::error!("publishing commanded segment colours for {device_id}: {err:#}");
+            }
         }
     }
 
