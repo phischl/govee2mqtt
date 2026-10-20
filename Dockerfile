@@ -30,7 +30,7 @@ WORKDIR /data
 # CVEs -- a dozen of them in the first Trivy scan. Verified against the
 # published binary: it runs here and completes a TLS handshake to Govee,
 # because distroless/static ships ca-certificates too.
-FROM gcr.io/distroless/static-debian13@sha256:0985f124d25d79a432b79e806764a9deb759e5c664be7c0633b9f13c3e12cbc0
+FROM gcr.io/distroless/static-debian13@sha256:9e0130bec991f471279b70f1630ada11e46dad439ef2949544f96001225329fb
 
 # Import from builder.
 COPY --from=builder /etc/passwd /etc/passwd
