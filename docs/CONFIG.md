@@ -72,6 +72,12 @@ nothing for a Bluetooth-only light, which no other transport will touch, and
 |`--ble-exclude`|`GOVEE_BLE_EXCLUDE=H601B,Desk Lamp`|`ble_exclude`|Keep individual devices off Bluetooth while leaving it enabled for everything else. Comma separated; each entry matches a device id, SKU or name, so `H601B` excludes a whole model and `15:25:60:74:F4:2B:2E:A4` a single light. Excluded devices fall back to LAN or the cloud exactly as they did before.|
 |`--transport-order`|`GOVEE_TRANSPORT_ORDER=lan,ble,iot,platform`|`transport_order`|Override which transports are preferred, as a comma separated list of `ble`, `nightlight`, `lan`, `iot`, `platform`. Acts as a priority prefix: the transports named here are tried first, followed by whatever else the operation allows. It never enables a transport an operation does not support. The default puts Bluetooth **last**, so devices that can be reached another way are; name `ble` earlier to prefer local Bluetooth control over the cloud.|
 
+The transport priority prefix also applies to segment batches. H7020
+colour-only batches default to LAN, AWS IoT, Bluetooth, then Platform API;
+other models and batches containing segment brightness retain the default
+AWS IoT, Bluetooth, Platform API order. An override cannot enable an
+unsupported segment route. See [LAN segment colour batches](LAN.md#segment-colour-batches).
+
 Bluetooth is used only when the executor reports itself online and the device's
 Bluetooth address is known. Addresses come from your Govee account metadata, so
 no manual configuration is needed. If Bluetooth fails repeatedly for a device,
@@ -184,4 +190,3 @@ You will also need to configure `govee2mqtt` to use the same broker:
 |`--mqtt-port`|`GOVEE_MQTT_PORT`|`mqtt_port`|The port number of the mqtt broker. The default is `1883`|
 |`--mqtt-username`|`GOVEE_MQTT_USER`|`mqtt_username`|If your broker requires authentication, the username to use|
 |`--mqtt-password`|`GOVEE_MQTT_PASSWORD`|`mqtt_password`|If your broker requires authentication, the password to use|
-

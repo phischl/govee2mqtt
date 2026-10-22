@@ -47,6 +47,12 @@ segment. Both were fixed by reading what the devices already say.
 - **The segment write command was reverse-engineered** —
   `33 05 15 01 <r> <g> <b> 00 00 00 00 00 <mask>`, a little-endian bitfield addressing at least
   thirty-two segments. Verified frame by frame against hardware.
+- **H7020 colour-only segment batches can stay on the LAN.** The same frames
+  travel in one UDP `ptReal` message, verified with individually addressed
+  bulbs and a full palette on a fifteen-bulb string. LAN is preferred by
+  default, and segment batches now honour the configured transport priority
+  prefix. Other models and batches containing segment brightness keep their
+  existing default routes. UDP submission is not a device acknowledgement.
 - **Segment colour costs no Platform API quota.** A fifteen-segment scene cost fifteen cloud
   requests upstream, two after batching, and none now: the colours ride one AWS IoT message, or
   one Bluetooth session.

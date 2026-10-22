@@ -38,6 +38,49 @@ For a device to be shown as usable via the LAN API in Govee2MQTT:
 See [LAN API Control Config](CONFIG.md#lan-api-control) for more details on how
 to configure these options.
 
+## Segment colour batches
+
+H7020 colour-only segment batches can use the LAN API instead of Govee's
+cloud. The existing 150 ms batch window groups colours into segment-mask
+frames and sends them together in one UDP `ptReal` message. No new MQTT topic,
+API key or Govee account login is needed for this delivery path; the bridge
+must already have discovered the device and its segment entities.
+
+The default segment transport order is LAN, AWS IoT, Bluetooth, then the
+Platform API. `--transport-order` / `GOVEE_TRANSPORT_ORDER` applies its usual
+priority prefix to the supported routes. Without LAN discovery, the next
+eligible transport is tried.
+The Platform route is skipped when its metadata cannot support every
+requested segment colour or brightness change, before any HTTP writes.
+
+LAN segment colour is enabled only for H7020. Testing on 2026-10-21 used
+firmware **1.00.14**, a string with **15 physical bulbs**, and an ARM64 Linux
+container. Initial raw-packet tests confirmed individual bulb addressing and
+two different colours in one message. Testing through Home Assistant and the
+patched bridge confirmed:
+
+* A single addressed bulb changed colour.
+* A full 15-colour palette was submitted in one LAN message containing 15
+  frames; the colours were reflected in the Govee app.
+* Main-light power and overall brightness controls continued to work.
+* After restarting the bridge, LAN discovery and MQTT reconnected, and another
+  15-colour palette was submitted in one LAN message.
+
+These checks do not establish support for other models, a second chained
+string, segment brightness, or atomic palette application.
+Brightness-only and mixed colour/brightness batches keep their existing
+AWS IoT, Bluetooth and Platform API routes; their default order is unchanged.
+A transport override cannot enable LAN for these batches or other models.
+
+A successful UDP send means the datagram was submitted, not that the device
+acknowledged or applied it. The bridge retains its existing optimistic
+commanded-colour updates. A local LAN send error is reported rather than
+silently retried through the cloud.
+
+Commands must arrive within the batching window to share a message. A card
+or automation that waits seconds between segment commands will still
+produce separate batches.
+
 ## Router / Network Setup tips
 
 * Some routers have optimizations that prevent multicast-UDP from crossing from
@@ -56,4 +99,3 @@ to configure these options.
 
 * If you have an IOT VLAN or similar, ensure that your firewall is not blocking
   the ports mentioned above
-

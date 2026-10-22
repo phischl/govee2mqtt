@@ -252,7 +252,14 @@ fn transport_by_id(id: TransportId) -> Option<&'static Arc<dyn Transport>> {
 /// defaults follow in their original order. Transports that the operation does
 /// not allow are never introduced by an override.
 pub fn resolve_order(op: &DeviceOp, override_order: Option<&[TransportId]>) -> Vec<TransportId> {
-    let default = op.default_transport_order();
+    resolve_transport_order(op.default_transport_order(), override_order)
+}
+
+/// Apply the configured priority prefix to a set of supported transports.
+pub fn resolve_transport_order(
+    default: &[TransportId],
+    override_order: Option<&[TransportId]>,
+) -> Vec<TransportId> {
     let Some(override_order) = override_order else {
         return default.to_vec();
     };

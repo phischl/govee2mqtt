@@ -78,6 +78,10 @@ impl State {
         *self.transport_order.lock().await = order;
     }
 
+    pub async fn get_transport_order(&self) -> Option<Vec<TransportId>> {
+        self.transport_order.lock().await.clone()
+    }
+
     pub async fn set_hass_disco_prefix(&self, prefix: String) {
         *self.hass_discovery_prefix.lock().await = prefix;
     }
@@ -360,7 +364,7 @@ impl State {
     /// Run a transport-agnostic operation against a device, letting
     /// `service::transport` pick the transport.
     pub async fn execute_op(self: &Arc<Self>, device: &Device, op: DeviceOp) -> anyhow::Result<()> {
-        let override_order = self.transport_order.lock().await.clone();
+        let override_order = self.get_transport_order().await;
         transport::execute_op(self, device, &op, override_order.as_deref()).await?;
         self.apply_op_side_effects(device, &op).await;
         Ok(())
@@ -377,7 +381,7 @@ impl State {
         if ops.is_empty() {
             return Ok(());
         }
-        let override_order = self.transport_order.lock().await.clone();
+        let override_order = self.get_transport_order().await;
         transport::execute_ops(self, device, ops, override_order.as_deref()).await?;
         for op in ops {
             self.apply_op_side_effects(device, op).await;

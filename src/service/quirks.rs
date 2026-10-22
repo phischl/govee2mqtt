@@ -197,6 +197,10 @@ pub fn segments_per_chained_string(sku: &str) -> Option<u32> {
     }
 }
 
+pub fn supports_lan_segment_color(sku: &str) -> bool {
+    matches!(sku, "H7020")
+}
+
 static QUIRKS: Lazy<HashMap<String, Quirk>> = Lazy::new(load_quirks);
 
 const STRIP: &str = "mdi:led-strip-variant";
