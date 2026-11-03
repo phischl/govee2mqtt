@@ -50,7 +50,7 @@ jobs:
           exit-code: "0"
 
       - name: Upload to code scanning
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-fs.sarif
           category: trivy-fs
@@ -95,7 +95,7 @@ jobs:
           exit-code: "0"
 
       - name: Upload to code scanning
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-image.sarif
           # Distinct per image, otherwise each upload would replace the last.
